@@ -1,0 +1,137 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  domain    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  uploads          Upload[]
+  rawEvents        RawEvent[]
+  visitorProfiles  VisitorProfile[]
+  tenantSummaries  TenantSummary[]
+
+  @@map("tenants")
+}
+
+model Upload {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  filename    String
+  status      String   @default("pending") // pending, processing, completed, error
+  rowCount    Int?     @map("row_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  processedAt DateTime? @map("processed_at")
+  error       String?
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rawEvents RawEvent[]
+
+  @@index([tenantId, createdAt])
+  @@map("uploads")
+}
+
+model RawEvent {
+  id                String   @id @default(uuid())
+  tenantId          String   @map("tenant_id")
+  uploadId          String   @map("upload_id")
+  visitorKey        String   @map("visitor_key")
+  uuid              String?
+  ip                String?  @map("ip")
+  eventTs           DateTime @map("event_ts")
+  eventType         String?  @map("event_type")
+  url               String?
+  referrerUrl       String?  @map("referrer_url")
+  timeOnPageMs      Int?     @map("time_on_page_ms")
+  idleTimeMs        Int?     @map("idle_time_ms")
+  scrollPct         Float?   @map("scroll_pct")
+  threshold         String?
+  elementIdentifier String?  @map("element_identifier")
+  elementText       String?  @map("element_text")
+  title             String?
+  coordinates       Json?    // {lat, lng} or null
+  rawJson           Json?    @map("raw_json")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  upload Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, visitorKey, eventTs])
+  @@index([tenantId, eventTs])
+  @@map("raw_events")
+}
+
+model GeoCache {
+  ip      String   @id
+  city    String?
+  region  String?
+  country String?
+  lat     Float?
+  lng     Float?
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("geo_cache")
+}
+
+model VisitorProfile {
+  id                  String   @id @default(uuid())
+  tenantId            String   @map("tenant_id")
+  windowStart         DateTime @map("window_start")
+  windowEnd           DateTime @map("window_end")
+  visitorKey          String   @map("visitor_key")
+  firstSeenAt         DateTime @map("first_seen_at")
+  lastSeenAt          DateTime @map("last_seen_at")
+  visitsCount         Int      @default(0) @map("visits_count")
+  totalEvents         Int      @default(0) @map("total_events")
+  pageViews           Int      @default(0) @map("page_views")
+  uniquePagesCount    Int      @default(0) @map("unique_pages_count")
+  totalTimeOnPageMs   Int      @default(0) @map("total_time_on_page_ms")
+  avgTimeOnPageMs     Float    @default(0) @map("avg_time_on_page_ms")
+  maxScrollPercentage Float    @default(0) @map("max_scroll_percentage")
+  flags               Json     // {is_repeat_visitor, high_attention, visited_key_page, cta_clicked, exit_intent_triggered, video_engaged}
+  engagementScore     Int      @default(0) @map("engagement_score")
+  engagementSegment   String   @map("engagement_segment") // Casual, Researcher, HighIntent, Action
+  lat                 Float?
+  lng                 Float?
+  city                String?
+  region              String?
+  country             String?
+  identity            Json?    // {firstName, lastName, companyName, companyDomain, jobTitle, seniorityLevel, emails, phones}
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, windowStart, windowEnd, visitorKey])
+  @@index([tenantId, windowStart, windowEnd, engagementScore])
+  @@index([tenantId, visitorKey])
+  @@map("visitor_profiles")
+}
+
+model TenantSummary {
+  id                 String   @id @default(uuid())
+  tenantId           String   @map("tenant_id")
+  windowStart        DateTime @map("window_start")
+  windowEnd          DateTime @map("window_end")
+  executiveSummary   String   @map("executive_summary")
+  keyObservations    Json     @map("key_observations") // array of strings
+  recommendedActions Json     @map("recommended_actions") // array of strings
+  notableSegments    Json     @map("notable_segments") // array of objects
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, windowStart, windowEnd])
+  @@index([tenantId, windowStart, windowEnd])
+  @@map("tenant_summaries")
+}

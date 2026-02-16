@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: pixel-insights
+    env: next
+    buildCommand: npx prisma generate && npm run build
+    startCommand: npm start
+    releaseCommand: npx prisma db push
+    envVars:
+      - key: DATABASE_URL
+        sync: false  # Set to your Supabase connection string in Render dashboard
+      - key: OPENAI_API_KEY
+        sync: false  # Optional - for AI summaries
+      - key: GEO_PROVIDER
+        value: ipinfo
+      - key: NODE_ENV
+        value: production
