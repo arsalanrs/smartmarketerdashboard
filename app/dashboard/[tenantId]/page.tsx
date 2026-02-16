@@ -211,6 +211,7 @@ export default function DashboardPage() {
       {/* Visitor Detail Drawer */}
       {selectedVisitor && (
         <VisitorDetail
+          tenantId={tenantId}
           visitor={selectedVisitor.profile}
           events={selectedVisitor.events}
           onClose={() => setSelectedVisitor(null)}

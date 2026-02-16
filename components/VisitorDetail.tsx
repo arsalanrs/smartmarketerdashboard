@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+
 interface Event {
   id: string
   eventTs: string
@@ -14,6 +16,7 @@ interface Event {
 }
 
 interface VisitorDetailProps {
+  tenantId?: string
   visitor: {
     visitorKey: string
     firstSeenAt: string
@@ -39,7 +42,7 @@ interface VisitorDetailProps {
   onClose: () => void
 }
 
-export default function VisitorDetail({ visitor, events, onClose }: VisitorDetailProps) {
+export default function VisitorDetail({ tenantId, visitor, events, onClose }: VisitorDetailProps) {
   const maskVisitorKey = (key: string) => {
     if (key.length <= 6) return '***' + key
     return '***' + key.slice(-6)
@@ -56,12 +59,22 @@ export default function VisitorDetail({ visitor, events, onClose }: VisitorDetai
                   ? `${visitor.identity.firstName || ''} ${visitor.identity.lastName || ''}`.trim()
                   : `Visitor: ${maskVisitorKey(visitor.visitorKey)}`}
               </h2>
-              <button
+              <div className="flex items-center gap-3">
+                {tenantId && (
+                  <Link
+                    href={`/dashboard/${tenantId}/visitors`}
+                    className="text-sm link-primary-blue"
+                  >
+                    View full details →
+                  </Link>
+                )}
+                <button
                 onClick={onClose}
                 className="rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
               >
                 ✕
               </button>
+              </div>
             </div>
           </div>
 

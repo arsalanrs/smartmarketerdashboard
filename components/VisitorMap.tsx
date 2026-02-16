@@ -30,8 +30,8 @@ export default function VisitorMap({ visitors }: VisitorMapProps) {
 
     // Dynamically import Leaflet only on client side
     import('leaflet').then((L) => {
-      // Initialize map
-      const map = L.default.map(containerRef.current!).setView([20, 0], 2)
+      // Default: US center, zoom 4. When we have markers, fitBounds will override.
+      const map = L.default.map(containerRef.current!).setView([39.5, -98.35], 4)
 
       L.default.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
@@ -104,15 +104,25 @@ export default function VisitorMap({ visitors }: VisitorMapProps) {
     })
   }, [visitors])
 
+  const coordCount = visitors.filter((v) => v.lat && v.lng).length
+
   return (
     <div className="overflow-hidden rounded-xl bg-white shadow-sm border border-gray-200">
       <div className="px-6 py-5 border-b border-gray-100">
         <h2 className="text-lg font-semibold text-gray-900">Visitor Map</h2>
         <p className="text-sm text-gray-500 mt-1">
-          {visitors.filter((v) => v.lat && v.lng).length} visitors with location data
+          {coordCount > 0
+            ? `${coordCount} visitors with location data`
+            : 'No location data — re-upload CSV with address or IP for map'}
         </p>
       </div>
-      <div ref={containerRef} className="h-96 w-full" />
+      <div ref={containerRef} className="h-96 w-full relative">
+        {coordCount === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50/90 z-[1000]">
+            <p className="text-sm text-gray-600">Re-upload CSV with address fields for accurate map</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
