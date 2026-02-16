@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
       sampleRawEvents,
       sampleProfiles,
       geoCacheEntries,
-      uniqueIPs: uniqueIPs.map((u) => ({
+      uniqueIPs: uniqueIPs.map((u: { ip: string | null; _count: { ip: number } }) => ({
         ip: u.ip,
         count: u._count.ip,
       })),
