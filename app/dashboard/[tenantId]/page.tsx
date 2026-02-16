@@ -1,13 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import KPICards from '@/components/KPICards'
 import EngagementBreakdown from '@/components/EngagementBreakdown'
 import VisitorMap from '@/components/VisitorMap'
 import VisitorList from '@/components/VisitorList'
-import VisitorDetail from '@/components/VisitorDetail'
 import AISummary from '@/components/AISummary'
 
 interface DashboardData {
@@ -59,19 +58,13 @@ interface DashboardData {
   }>
 }
 
-interface VisitorDetailData {
-  profile: any
-  events: any[]
-}
-
 export default function DashboardPage() {
   const params = useParams()
+  const router = useRouter()
   const tenantId = params.tenantId as string
   const [window, setWindow] = useState('L30')
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedVisitor, setSelectedVisitor] = useState<VisitorDetailData | null>(null)
-  const [loadingVisitor, setLoadingVisitor] = useState(false)
 
   useEffect(() => {
     if (tenantId) {
@@ -114,24 +107,8 @@ export default function DashboardPage() {
     }
   }
 
-  const handleVisitorClick = async (visitor: any) => {
-    setLoadingVisitor(true)
-    try {
-      const res = await fetch(
-        `/api/visitor/${encodeURIComponent(visitor.visitorKey)}?tenantId=${tenantId}`
-      )
-      if (res.ok) {
-        const visitorData = await res.json()
-        setSelectedVisitor(visitorData)
-      } else {
-        alert('Failed to load visitor details')
-      }
-    } catch (error) {
-      console.error('Error fetching visitor:', error)
-      alert('Failed to load visitor details')
-    } finally {
-      setLoadingVisitor(false)
-    }
+  const handleVisitorClick = (visitor: any) => {
+    router.push(`/dashboard/${tenantId}/visitors?select=${encodeURIComponent(visitor.visitorKey)}`)
   }
 
   if (loading) {
@@ -207,24 +184,6 @@ export default function DashboardPage() {
         </div>
         <VisitorList visitors={data.profiles} onVisitorClick={handleVisitorClick} />
       </div>
-
-      {/* Visitor Detail Drawer */}
-      {selectedVisitor && (
-        <VisitorDetail
-          tenantId={tenantId}
-          visitor={selectedVisitor.profile}
-          events={selectedVisitor.events}
-          onClose={() => setSelectedVisitor(null)}
-        />
-      )}
-
-      {loadingVisitor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="rounded-lg bg-white p-6">
-            <p>Loading visitor details...</p>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import VisitorSidebar from '@/components/VisitorSidebar'
 import VisitorDetailPanel from '@/components/VisitorDetailPanel'
 
@@ -41,7 +41,9 @@ interface VisitorDetailData {
 
 export default function VisitorsPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const tenantId = params.tenantId as string
+  const selectVisitorKey = searchParams.get('select')
   const [window, setWindow] = useState('L30')
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -55,7 +57,7 @@ export default function VisitorsPage() {
       fetchDashboard()
       fetchTenantName()
     }
-  }, [tenantId, window])
+  }, [tenantId, window, selectVisitorKey])
 
   const fetchTenantName = async () => {
     try {
@@ -80,9 +82,14 @@ export default function VisitorsPage() {
         const dashboardData = await res.json()
         setData(dashboardData)
         
-        // Auto-select first visitor if none selected
+        // Select visitor from ?select=visitorKey param (from dashboard click), or auto-select first
         if (dashboardData.profiles.length > 0 && !selectedVisitorId) {
-          handleVisitorSelect(dashboardData.profiles[0])
+          if (selectVisitorKey) {
+            const match = dashboardData.profiles.find((p: any) => p.visitorKey === selectVisitorKey)
+            handleVisitorSelect(match || dashboardData.profiles[0])
+          } else {
+            handleVisitorSelect(dashboardData.profiles[0])
+          }
         }
       } else {
         const error = await res.json()
