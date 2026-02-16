@@ -374,65 +374,12 @@ async function processVisitorProfile(
 
   const segment = getEngagementSegment(score)
 
-  // Get geo location (use first event with IP or coordinates)
-  let geo: { lat?: number; lng?: number; city?: string; region?: string; country?: string } = {}
-  const eventWithGeo = events.find((e) => e.coordinates || e.ip)
-  if (eventWithGeo) {
-    if (eventWithGeo.coordinates) {
-      geo = {
-        lat: eventWithGeo.coordinates.lat,
-        lng: eventWithGeo.coordinates.lng,
-      }
-      console.log(`Using coordinates for visitor ${visitorKey}:`, geo)
-    } else if (eventWithGeo.ip) {
-      console.log(`Geolocating IP for visitor ${visitorKey}: ${eventWithGeo.ip}`)
-      const geoData = await getGeoLocation(eventWithGeo.ip)
-      if (geoData) {
-        geo = geoData
-        console.log(`Geo result for ${eventWithGeo.ip}:`, geo)
-      } else {
-        console.warn(`No geo data returned for IP: ${eventWithGeo.ip}`)
-      }
-    }
-  } else {
-    console.warn(`No IP or coordinates found for visitor ${visitorKey}`)
-  }
-
-  // Extract identity overlay (if present) - handle uppercase Smart Pixel format
+  // Extract identity overlay first (needed for address-based geo)
   const firstEvent = events[0]
   const identity: any = {}
-  
-  // Fallback: Try geocoding from address fields if no geo data yet
-  if ((!geo.lat || !geo.lng) && firstEvent.rawJson) {
-    const raw = firstEvent.rawJson as any
-    const address = raw['PERSONAL_ADDRESS'] || raw['Personal Address'] || raw['personal_address'] || raw['COMPANY_ADDRESS'] || raw['Company Address'] || raw['company_address']
-    const city = raw['PERSONAL_CITY'] || raw['Personal City'] || raw['personal_city'] || raw['COMPANY_CITY'] || raw['Company City'] || raw['company_city']
-    const state = raw['PERSONAL_STATE'] || raw['Personal State'] || raw['personal_state'] || raw['COMPANY_STATE'] || raw['Company State'] || raw['company_state']
-    const zip = raw['PERSONAL_ZIP'] || raw['Personal Zip'] || raw['personal_zip'] || raw['COMPANY_ZIP'] || raw['Company Zip'] || raw['company_zip']
-    const country = raw['PERSONAL_COUNTRY'] || raw['Personal Country'] || raw['personal_country'] || raw['COMPANY_COUNTRY'] || raw['Company Country'] || raw['company_country'] || 'US'
+  const raw = firstEvent?.rawJson as Record<string, unknown> | undefined
 
-    if (address || city || state || zip) {
-      console.log(`Attempting to geocode address for visitor ${visitorKey}:`, { address, city, state, zip })
-      const { geocodeAddress } = await import('./geo')
-      const addressGeo = await geocodeAddress(address || '', city || '', state || '', zip || '', country || 'US')
-      if (addressGeo && addressGeo.lat && addressGeo.lng) {
-        geo = {
-          ...geo,
-          lat: addressGeo.lat,
-          lng: addressGeo.lng,
-          city: addressGeo.city || city || geo.city,
-          region: addressGeo.region || state || geo.region,
-          country: addressGeo.country || country || geo.country,
-        }
-        console.log(`Geocoded address result for visitor ${visitorKey}:`, geo)
-      } else {
-        console.warn(`Geocoding failed for address: ${address || city || state || zip}`)
-      }
-    }
-  }
-  
-  if (firstEvent.rawJson) {
-    const raw = firstEvent.rawJson as any
+  if (raw) {
     // Handle both uppercase (Smart Pixel) and mixed case column names
     if (raw['FIRST_NAME'] || raw['First Name'] || raw['first_name']) {
       identity.firstName = raw['FIRST_NAME'] || raw['First Name'] || raw['first_name']
@@ -476,6 +423,57 @@ async function processVisitorProfile(
     }
     if (raw['PERSONAL_ZIP'] || raw['Personal Zip'] || raw['personal_zip']) {
       identity.zip = raw['PERSONAL_ZIP'] || raw['Personal Zip'] || raw['personal_zip']
+    }
+  }
+
+  // Get geo: prefer address geocoding when sheet has address (accurate map), else IP-based
+  let geo: { lat?: number; lng?: number; city?: string; region?: string; country?: string } = {}
+  const addressFromSheet = (raw?.['PERSONAL_ADDRESS'] || raw?.['Personal Address'] || raw?.['personal_address'] || raw?.['COMPANY_ADDRESS'] || raw?.['Company Address'] || raw?.['company_address']) as string | undefined
+  const cityFromSheet = (raw?.['PERSONAL_CITY'] || raw?.['Personal City'] || raw?.['personal_city'] || raw?.['COMPANY_CITY'] || raw?.['Company City'] || raw?.['company_city']) as string | undefined
+  const stateFromSheet = (raw?.['PERSONAL_STATE'] || raw?.['Personal State'] || raw?.['personal_state'] || raw?.['COMPANY_STATE'] || raw?.['Company State'] || raw?.['company_state']) as string | undefined
+  const zipFromSheet = (raw?.['PERSONAL_ZIP'] || raw?.['Personal Zip'] || raw?.['personal_zip'] || raw?.['COMPANY_ZIP'] || raw?.['Company Zip'] || raw?.['company_zip']) as string | undefined
+  const countryFromSheet = (raw?.['PERSONAL_COUNTRY'] || raw?.['Personal Country'] || raw?.['personal_country'] || raw?.['COMPANY_COUNTRY'] || raw?.['Company Country'] || raw?.['company_country'] || 'US') as string
+  const hasAddressFromSheet = !!(addressFromSheet || cityFromSheet || stateFromSheet || zipFromSheet)
+
+  if (hasAddressFromSheet) {
+    // Prefer address geocoding when sheet has address - map shows accurate location
+    const { geocodeAddress } = await import('./geo')
+    const addressGeo = await geocodeAddress(
+      addressFromSheet || '',
+      cityFromSheet || '',
+      stateFromSheet || '',
+      zipFromSheet || '',
+      countryFromSheet || 'US'
+    )
+    if (addressGeo?.lat && addressGeo?.lng) {
+      geo = {
+        lat: addressGeo.lat,
+        lng: addressGeo.lng,
+        city: addressGeo.city || cityFromSheet || undefined,
+        region: addressGeo.region || stateFromSheet || undefined,
+        country: addressGeo.country || countryFromSheet || undefined,
+      }
+      console.log(`Using address geocode for visitor ${visitorKey}:`, geo)
+    }
+  }
+
+  if (!geo.lat || !geo.lng) {
+    // Fallback: IP-based geo or event coordinates
+    const eventWithGeo = events.find((e) => e.coordinates || e.ip)
+    if (eventWithGeo) {
+      if (eventWithGeo.coordinates) {
+        geo = {
+          lat: eventWithGeo.coordinates.lat,
+          lng: eventWithGeo.coordinates.lng,
+        }
+        console.log(`Using event coordinates for visitor ${visitorKey}:`, geo)
+      } else if (eventWithGeo.ip) {
+        const geoData = await getGeoLocation(eventWithGeo.ip)
+        if (geoData) {
+          geo = geoData
+          console.log(`Using IP geo for visitor ${visitorKey}:`, geo)
+        }
+      }
     }
   }
 
