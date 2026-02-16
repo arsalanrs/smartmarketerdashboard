@@ -38,6 +38,7 @@ interface DebugData {
     eventType: string | null
     url: string | null
     ip: string | null
+    coordinates?: { lat: number; lng: number } | null
   }>
       sampleProfiles: Array<{
         id: string
@@ -338,8 +339,8 @@ export default function DebugPage() {
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
               {data.sampleRawEvents.map((event) => {
-                const coords = event.coordinates as any
-                const coordStr = coords?.lat && coords?.lng
+                const coords = event.coordinates
+                const coordStr = coords?.lat != null && coords?.lng != null
                   ? `${coords.lat.toFixed(2)}, ${coords.lng.toFixed(2)}`
                   : '-'
                 
