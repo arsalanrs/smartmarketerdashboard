@@ -1,3 +1,4 @@
+import { Readable } from 'stream'
 import Papa from 'papaparse'
 import { prisma } from './prisma'
 import { parseCoordinates, getGeoLocation } from './geo'
@@ -202,6 +203,149 @@ function groupIntoSessions(events: ProcessedEvent[]): ProcessedEvent[][] {
   return sessions
 }
 
+function mapEventToDbRow(event: ProcessedEvent, tenantId: string, uploadId: string) {
+  return {
+    tenantId,
+    uploadId,
+    visitorKey: event.visitorKey,
+    uuid: event.uuid || null,
+    ip: event.ip || null,
+    eventTs: event.eventTs,
+    eventType: event.eventType || null,
+    url: event.url || null,
+    referrerUrl: event.referrerUrl || null,
+    timeOnPageMs: event.timeOnPageMs || null,
+    idleTimeMs: event.idleTimeMs || null,
+    scrollPct: event.scrollPct || null,
+    threshold: event.threshold || null,
+    elementIdentifier: event.elementIdentifier || null,
+    elementText: event.elementText || null,
+    title: event.title || null,
+    coordinates: event.coordinates ? (event.coordinates as any) : null,
+    rawJson: event.rawJson || null,
+  }
+}
+
+/**
+ * Process CSV from stream - never loads full file into memory (avoids OOM on large files)
+ */
+export async function processCSVUploadFromStream(
+  tenantId: string,
+  uploadId: string,
+  stream: ReadableStream<Uint8Array>
+): Promise<{ rowCount: number; error?: string }> {
+  return new Promise((resolve, reject) => {
+    const visitorKeys = new Set<string>()
+    let minTs = Infinity
+    let maxTs = -Infinity
+    let totalProcessed = 0
+    const batch: ProcessedEvent[] = []
+    let insertChain = Promise.resolve() as Promise<void>
+
+    const flushBatch = async (toInsert: ProcessedEvent[]) => {
+      if (toInsert.length === 0) return
+      await prisma.rawEvent.createMany({
+        data: toInsert.map((e) => mapEventToDbRow(e, tenantId, uploadId)),
+        skipDuplicates: false,
+      })
+      totalProcessed += toInsert.length
+    }
+
+    const nodeStream = Readable.fromWeb(stream as any)
+    Papa.parse(nodeStream, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (h: string) => h.trim(),
+      step(results: { data: CSVRow | CSVRow[] }, parser: { pause: () => void; resume: () => void }) {
+        const rows = Array.isArray(results.data) ? results.data : [results.data].filter(Boolean) as CSVRow[]
+        for (const row of rows) {
+          const event = parseRow(row)
+          if (event) {
+            batch.push(event)
+            visitorKeys.add(event.visitorKey)
+            const t = event.eventTs.getTime()
+            if (t < minTs) minTs = t
+            if (t > maxTs) maxTs = t
+          }
+        }
+        if (batch.length >= 200) {
+          const toInsert = batch.splice(0, 200)
+          parser.pause()
+          insertChain = insertChain.then(() => flushBatch(toInsert))
+          insertChain.finally(() => parser.resume())
+        }
+      },
+      async complete() {
+        try {
+          await insertChain
+          if (batch.length > 0) await flushBatch(batch.splice(0))
+
+          if (totalProcessed === 0) {
+            const errorMsg = 'No valid events found. CSV had no rows with valid timestamps.'
+            await prisma.upload.update({
+              where: { id: uploadId },
+              data: { status: 'error', error: errorMsg, rowCount: 0 },
+            })
+            resolve({ rowCount: 0, error: errorMsg })
+            return
+          }
+
+          console.log(`Inserted ${totalProcessed} events, ${visitorKeys.size} unique visitors (streaming)`)
+
+          const windowEnd = new Date(maxTs)
+          const windowStart = new Date(Math.max(minTs, maxTs - 30 * 24 * 60 * 60 * 1000))
+
+          for (const visitorKey of visitorKeys) {
+            const rawEvents = await prisma.rawEvent.findMany({
+              where: { tenantId, uploadId, visitorKey },
+              orderBy: { eventTs: 'asc' },
+            })
+            const events: ProcessedEvent[] = rawEvents.map((r) => ({
+              visitorKey: r.visitorKey,
+              uuid: r.uuid ?? undefined,
+              ip: r.ip ?? undefined,
+              eventTs: r.eventTs,
+              eventType: r.eventType ?? undefined,
+              url: r.url ?? undefined,
+              referrerUrl: r.referrerUrl ?? undefined,
+              timeOnPageMs: r.timeOnPageMs ?? undefined,
+              idleTimeMs: r.idleTimeMs ?? undefined,
+              scrollPct: r.scrollPct ?? undefined,
+              threshold: r.threshold ?? undefined,
+              elementIdentifier: r.elementIdentifier ?? undefined,
+              elementText: r.elementText ?? undefined,
+              title: r.title ?? undefined,
+              coordinates: r.coordinates as { lat: number; lng: number } | null | undefined,
+              rawJson: r.rawJson as Record<string, unknown> | undefined,
+            }))
+            await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd)
+          }
+
+          await prisma.upload.update({
+            where: { id: uploadId },
+            data: { status: 'completed', rowCount: totalProcessed, processedAt: new Date() },
+          })
+          resolve({ rowCount: totalProcessed })
+        } catch (err: any) {
+          console.error('Error in CSV stream complete:', err)
+          await prisma.upload.update({
+            where: { id: uploadId },
+            data: { status: 'error', error: err?.message || 'Processing failed' },
+          })
+          resolve({ rowCount: 0, error: err?.message })
+        }
+      },
+      error(err: Error) {
+        prisma.upload.update({
+          where: { id: uploadId },
+          data: { status: 'error', error: err?.message || 'Parse failed' },
+        }).catch(() => {})
+        reject(err)
+      },
+    })
+  })
+}
+
 /**
  * Process CSV upload and create visitor profiles
  */
@@ -249,26 +393,7 @@ export async function processCSVUpload(
       totalProcessed += batch.length
 
       await prisma.rawEvent.createMany({
-        data: batch.map((event) => ({
-          tenantId,
-          uploadId,
-          visitorKey: event.visitorKey,
-          uuid: event.uuid || null,
-          ip: event.ip || null,
-          eventTs: event.eventTs,
-          eventType: event.eventType || null,
-          url: event.url || null,
-          referrerUrl: event.referrerUrl || null,
-          timeOnPageMs: event.timeOnPageMs || null,
-          idleTimeMs: event.idleTimeMs || null,
-          scrollPct: event.scrollPct || null,
-          threshold: event.threshold || null,
-          elementIdentifier: event.elementIdentifier || null,
-          elementText: event.elementText || null,
-          title: event.title || null,
-          coordinates: event.coordinates ? (event.coordinates as any) : null,
-          rawJson: event.rawJson || null,
-        })),
+        data: batch.map((event) => mapEventToDbRow(event, tenantId, uploadId)),
         skipDuplicates: false,
       })
     }

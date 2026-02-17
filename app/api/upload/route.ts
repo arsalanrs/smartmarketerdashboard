@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { processCSVUpload } from '@/lib/csv-processor'
+import { processCSVUploadFromStream } from '@/lib/csv-processor'
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,13 +34,12 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Read file content
-    const csvContent = await file.text()
+    // Stream file - never load full content into memory (avoids OOM on large CSVs)
+    const stream = file.stream()
 
-    // Process synchronously so status is always updated (avoids stuck "processing" on serverless/timeout)
     let result: { rowCount: number; error?: string }
     try {
-      result = await processCSVUpload(tenantId, upload.id, csvContent)
+      result = await processCSVUploadFromStream(tenantId, upload.id, stream)
       console.log(`Upload ${upload.id} processed:`, result)
     } catch (error: any) {
       console.error(`Upload ${upload.id} failed:`, error)
