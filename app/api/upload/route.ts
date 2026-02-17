@@ -37,20 +37,30 @@ export async function POST(request: NextRequest) {
     // Read file content
     const csvContent = await file.text()
 
-    // Process in background (for MVP, we'll do it synchronously)
-    // In production, this should be moved to a queue/worker
-    processCSVUpload(tenantId, upload.id, csvContent)
-      .then((result) => {
-        console.log(`Upload ${upload.id} processed:`, result)
+    // Process synchronously so status is always updated (avoids stuck "processing" on serverless/timeout)
+    let result: { rowCount: number; error?: string }
+    try {
+      result = await processCSVUpload(tenantId, upload.id, csvContent)
+      console.log(`Upload ${upload.id} processed:`, result)
+    } catch (error: any) {
+      console.error(`Upload ${upload.id} failed:`, error)
+      await prisma.upload.update({
+        where: { id: upload.id },
+        data: { status: 'error', error: error?.message || 'Processing failed' },
       })
-      .catch((error) => {
-        console.error(`Upload ${upload.id} failed:`, error)
-      })
+      return NextResponse.json(
+        { id: upload.id, status: 'error', error: error?.message },
+        { status: 200 }
+      )
+    }
 
+    const status = result.error ? 'error' : 'completed'
     return NextResponse.json({
       id: upload.id,
-      status: upload.status,
-      message: 'Upload started processing',
+      status,
+      rowCount: result.rowCount,
+      error: result.error,
+      message: status === 'completed' ? 'Upload processed' : result.error,
     })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })

@@ -36,7 +36,7 @@ export default function Nav() {
                 : {}
               }
             >
-              Tenants
+              Clients
             </Link>
             <Link
               href="/admin/upload"

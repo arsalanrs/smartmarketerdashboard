@@ -27,38 +27,55 @@ export interface ProcessedEvent {
 }
 
 /**
- * Normalize timestamp to UTC ISO
+ * Normalize timestamp to UTC ISO; returns null if invalid or out of reasonable range
  */
 function normalizeTimestamp(value: string | undefined): Date | null {
-  if (!value) return null
+  if (!value || typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
   try {
-    return new Date(value)
+    const d = new Date(trimmed)
+    if (Number.isNaN(d.getTime())) return null
+    const year = d.getFullYear()
+    if (year < 2000 || year > 2030) return null
+    return d
   } catch {
     return null
   }
+}
+
+/** Known timestamp column names (order matters: most common first) */
+const TIMESTAMP_KEYS = [
+  'EVENT_TIMESTAMP', 'Event Timestamp', 'event_timestamp',
+  'timestamp', 'Timestamp', 'created_at', 'Created At', 'Created At (UTC)',
+  'event_time', 'Event Time', 'event time', 'time', 'Time', 'date', 'Date',
+  'datetime', 'DateTime', 'created', 'Created', 'Date (UTC)', 'date_utc',
+]
+
+function getTimestampFromRow(row: CSVRow): Date | null {
+  for (const key of TIMESTAMP_KEYS) {
+    const val = row[key]
+    if (val !== undefined && val !== '') {
+      const d = normalizeTimestamp(val)
+      if (d) return d
+    }
+  }
+  // Fallback: try any column value that looks like a date (ISO or common formats)
+  for (const [, value] of Object.entries(row)) {
+    if (value === undefined || value === '') continue
+    if (typeof value !== 'string') continue
+    const d = normalizeTimestamp(value)
+    if (d) return d
+  }
+  return null
 }
 
 /**
  * Parse CSV row into ProcessedEvent
  */
 function parseRow(row: CSVRow): ProcessedEvent | null {
-  // Try multiple timestamp column name variations (uppercase first for Smart Pixel format)
-  const eventTs = normalizeTimestamp(
-    row['EVENT_TIMESTAMP'] ||
-    row['Event Timestamp'] || 
-    row['event_timestamp'] || 
-    row['timestamp'] ||
-    row['Timestamp'] ||
-    row['Time'] ||
-    row['time'] ||
-    row['Date'] ||
-    row['date']
-  )
-  if (!eventTs) {
-    // Log first few rows that fail to help debug
-    console.warn('Row missing timestamp, skipping:', Object.keys(row).slice(0, 5))
-    return null
-  }
+  const eventTs = getTimestampFromRow(row)
+  if (!eventTs) return null
 
   const uuid = row['UUID'] || row['Uuid'] || row['uuid'] || undefined
   const ip = row['IP_ADDRESS'] || row['Ip Address'] || row['ip_address'] || row['ip'] || undefined
@@ -268,20 +285,6 @@ export async function processCSVUpload(
     // Process each visitor
     for (const [visitorKey, events] of visitorGroups.entries()) {
       await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd)
-    }
-
-    if (processedEvents.length === 0) {
-      const errorMsg = `No valid events found. CSV had ${rows.length} rows but none had valid timestamps. Check CSV format.`
-      console.error(errorMsg)
-      await prisma.upload.update({
-        where: { id: uploadId },
-        data: {
-          status: 'error',
-          error: errorMsg,
-          rowCount: 0,
-        },
-      })
-      return { rowCount: 0, error: errorMsg }
     }
 
     // Update upload status

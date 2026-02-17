@@ -40,6 +40,22 @@ export default function TenantsPage() {
     }
   }
 
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete client "${name}" and all their data (uploads, events, visitors)? This cannot be undone.`)) return
+    try {
+      const res = await fetch(`/api/tenants/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        fetchTenants()
+      } else {
+        const err = await res.json()
+        alert(err.error || 'Failed to delete client')
+      }
+    } catch (error) {
+      console.error('Error deleting client:', error)
+      alert('Failed to delete client')
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
@@ -54,11 +70,11 @@ export default function TenantsPage() {
         fetchTenants()
       } else {
         const error = await res.json()
-        alert(error.error || 'Failed to create tenant')
+        alert(error.error || 'Failed to create client')
       }
     } catch (error) {
-      console.error('Error creating tenant:', error)
-      alert('Failed to create tenant')
+      console.error('Error creating client:', error)
+      alert('Failed to create client')
     }
   }
 
@@ -73,18 +89,18 @@ export default function TenantsPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Tenants</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
         <button
           onClick={() => setShowForm(!showForm)}
           className="rounded-md px-4 py-2 text-white btn-primary-blue"
         >
-          {showForm ? 'Cancel' : 'Create Tenant'}
+          {showForm ? 'Cancel' : 'Create Client'}
         </button>
       </div>
 
       {showForm && (
         <div className="mb-6 rounded-lg border bg-white p-6 shadow">
-          <h2 className="mb-4 text-lg font-semibold">Create New Tenant</h2>
+          <h2 className="mb-4 text-lg font-semibold">Create New Client</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="name" className="block text-sm font-medium text-gray-700">
@@ -143,7 +159,7 @@ export default function TenantsPage() {
             {tenants.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-6 py-4 text-center text-gray-500">
-                  No tenants yet. Create one to get started.
+                  No clients yet. Create one to get started.
                 </td>
               </tr>
             ) : (
@@ -159,12 +175,21 @@ export default function TenantsPage() {
                     {new Date(tenant.createdAt).toLocaleDateString()}
                   </td>
                   <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
-                    <Link
-                      href={`/dashboard/${tenant.id}`}
-                      className="link-primary-blue"
-                    >
-                      View Dashboard
-                    </Link>
+                    <div className="flex items-center gap-3">
+                      <Link
+                        href={`/dashboard/${tenant.id}`}
+                        className="link-primary-blue"
+                      >
+                        View Dashboard
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(tenant.id, tenant.name)}
+                        className="text-red-600 hover:text-red-800 text-sm"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))

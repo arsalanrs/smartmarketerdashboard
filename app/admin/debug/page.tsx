@@ -148,7 +148,7 @@ export default function DebugPage() {
       {/* Summary Cards */}
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
         <div className="rounded-lg border bg-white p-4 shadow">
-          <div className="text-sm text-gray-500">Tenants</div>
+          <div className="text-sm text-gray-500">Clients</div>
           <div className="text-2xl font-bold text-gray-900">{data.summary.tenantsCount}</div>
         </div>
         <div className="rounded-lg border bg-white p-4 shadow">
@@ -165,9 +165,9 @@ export default function DebugPage() {
         </div>
       </div>
 
-      {/* Tenants */}
+      {/* Clients */}
       <div className="mb-6 rounded-lg border bg-white p-6 shadow">
-        <h2 className="mb-4 text-lg font-semibold text-gray-900">Tenants</h2>
+        <h2 className="mb-4 text-lg font-semibold text-gray-900">Clients</h2>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">

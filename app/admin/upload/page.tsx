@@ -135,11 +135,19 @@ export default function UploadPage() {
       if (res.ok) {
         const data = await res.json()
         setFile(null)
-        // Reset file input
         const fileInput = document.getElementById('file') as HTMLInputElement
         if (fileInput) fileInput.value = ''
-        
-        // Start polling for status
+        // If server already returned final status (sync processing), handle it
+        if (data.status === 'completed') {
+          setProcessing(true)
+          setProgress(`Processing complete! Processed ${data.rowCount ?? 0} rows.`)
+          setTimeout(() => router.push(`/dashboard/${selectedTenantId}`), 2000)
+          return
+        }
+        if (data.status === 'error') {
+          setProgress(`Error: ${data.error || 'Unknown error'}`)
+          return
+        }
         await pollUploadStatus(data.id, selectedTenantId)
       } else {
         const error = await res.json()
@@ -197,7 +205,7 @@ export default function UploadPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="tenant" className="block text-sm font-medium text-gray-700">
-              Tenant *
+              Client *
             </label>
             <select
               id="tenant"
@@ -207,7 +215,7 @@ export default function UploadPage() {
               disabled={uploading || processing}
               className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:outline-none focus:border-[#1D6E95] focus:ring-1 focus:ring-[#1D6E95] disabled:bg-gray-100"
             >
-              <option value="">Select a tenant</option>
+              <option value="">Select a client</option>
               {tenants.map((tenant) => (
                 <option key={tenant.id} value={tenant.id}>
                   {tenant.name}
