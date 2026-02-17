@@ -77,9 +77,11 @@ function parseRow(row: CSVRow): ProcessedEvent | null {
   const eventTs = getTimestampFromRow(row)
   if (!eventTs) return null
 
+  const hemSha256 = row['HEM_SHA256'] || row['Hem Sha256'] || row['hem_sha256'] || undefined
   const uuid = row['UUID'] || row['Uuid'] || row['uuid'] || undefined
   const ip = row['IP_ADDRESS'] || row['Ip Address'] || row['ip_address'] || row['ip'] || undefined
-  const visitorKey = uuid || ip || 'unknown'
+  // HEM_SHA256 (hashed email) is primary in Smart Pixel exports; many rows share IP so uuid/ip alone would collapse visitors
+  const visitorKey = hemSha256 || uuid || ip || 'unknown'
 
   // Parse EVENT_DATA JSON if present (Smart Pixel format)
   let eventData: any = null
