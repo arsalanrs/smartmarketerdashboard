@@ -125,6 +125,19 @@ function parseRow(row: CSVRow): ProcessedEvent | null {
     const timeOnPage = row['Timeonpage'] || row['time_on_page'] || row['timeonpage'] || row['TIME_ON_PAGE']
     timeOnPageMs = timeOnPage ? Math.max(0, Math.min(600000, parseInt(timeOnPage) * 1000)) : undefined
   }
+  if (!timeOnPageMs) {
+    // Smart Pixel: ACTIVITY_START_DATE and ACTIVITY_END_DATE give time spent on the row (in seconds)
+    const startStr = row['ACTIVITY_START_DATE'] || row['Activity Start Date'] || row['activity_start_date']
+    const endStr = row['ACTIVITY_END_DATE'] || row['Activity End Date'] || row['activity_end_date']
+    if (startStr && endStr) {
+      const startTs = normalizeTimestamp(startStr)?.getTime()
+      const endTs = normalizeTimestamp(endStr)?.getTime()
+      if (startTs != null && endTs != null && endTs >= startTs) {
+        const seconds = Math.max(0, Math.min(600, (endTs - startTs) / 1000))
+        timeOnPageMs = Math.round(seconds) * 1000
+      }
+    }
+  }
   if (!idleTimeMs) {
     const idleTime = row['Idletime'] || row['idle_time'] || row['idletime'] || row['IDLE_TIME']
     idleTimeMs = idleTime ? Math.max(0, parseInt(idleTime) * 1000) : undefined
