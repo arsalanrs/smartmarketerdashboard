@@ -209,37 +209,30 @@ export async function processCSVUpload(
 
     const rows = parseResult.data
     console.log(`Parsed ${rows.length} rows from CSV`)
-    
-    const processedEvents: ProcessedEvent[] = []
 
-    // Simple parsing - just use whatever is there, no filtering
-    for (const row of rows) {
-      const event = parseRow(row)
-      if (event) {
-        processedEvents.push(event)
+    const visitorKeys = new Set<string>()
+    let minTs = Infinity
+    let maxTs = -Infinity
+    let totalProcessed = 0
+    const insertBatchSize = 200
+
+    // Process and insert in chunks - never hold full processedEvents in memory
+    for (let i = 0; i < rows.length; i += insertBatchSize) {
+      const chunk = rows.slice(i, i + insertBatchSize)
+      const batch: ProcessedEvent[] = []
+      for (const row of chunk) {
+        const event = parseRow(row)
+        if (event) {
+          batch.push(event)
+          visitorKeys.add(event.visitorKey)
+          const t = event.eventTs.getTime()
+          if (t < minTs) minTs = t
+          if (t > maxTs) maxTs = t
+        }
       }
-    }
-    
-    console.log(`Successfully parsed ${processedEvents.length} events from ${rows.length} rows`)
-    
-    if (processedEvents.length === 0) {
-      const errorMsg = `No valid events found. CSV had ${rows.length} rows but none had valid timestamps. Check that CSV has a timestamp column.`
-      console.error(errorMsg)
-      await prisma.upload.update({
-        where: { id: uploadId },
-        data: {
-          status: 'error',
-          error: errorMsg,
-          rowCount: 0,
-        },
-      })
-      return { rowCount: 0, error: errorMsg }
-    }
+      if (batch.length === 0) continue
+      totalProcessed += batch.length
 
-    // Insert raw events in batches
-    const batchSize = 1000
-    for (let i = 0; i < processedEvents.length; i += batchSize) {
-      const batch = processedEvents.slice(i, i + batchSize)
       await prisma.rawEvent.createMany({
         data: batch.map((event) => ({
           tenantId,
@@ -265,25 +258,44 @@ export async function processCSVUpload(
       })
     }
 
-    // Group by visitor and compute profiles
-    const visitorGroups = new Map<string, ProcessedEvent[]>()
-    for (const event of processedEvents) {
-      const key = event.visitorKey
-      if (!visitorGroups.has(key)) {
-        visitorGroups.set(key, [])
-      }
-      visitorGroups.get(key)!.push(event)
+    console.log(`Inserted ${totalProcessed} events, ${visitorKeys.size} unique visitors`)
+
+    if (totalProcessed === 0) {
+      const errorMsg = `No valid events found. CSV had ${rows.length} rows but none had valid timestamps. Check that CSV has a timestamp column.`
+      await prisma.upload.update({
+        where: { id: uploadId },
+        data: { status: 'error', error: errorMsg, rowCount: 0 },
+      })
+      return { rowCount: 0, error: errorMsg }
     }
 
-    // Calculate time window (default: last 30 days from latest event)
-    const allTimestamps = processedEvents.map((e) => e.eventTs.getTime())
-    const latestTs = Math.max(...allTimestamps)
-    const earliestTs = Math.min(...allTimestamps)
-    const windowEnd = new Date(latestTs)
-    const windowStart = new Date(Math.max(earliestTs, latestTs - 30 * 24 * 60 * 60 * 1000))
+    const windowEnd = new Date(maxTs)
+    const windowStart = new Date(Math.max(minTs, maxTs - 30 * 24 * 60 * 60 * 1000))
 
-    // Process each visitor
-    for (const [visitorKey, events] of visitorGroups.entries()) {
+    // Build visitor profiles by fetching from DB one visitor at a time (avoids holding all data in memory)
+    for (const visitorKey of visitorKeys) {
+      const rawEvents = await prisma.rawEvent.findMany({
+        where: { tenantId, uploadId, visitorKey },
+        orderBy: { eventTs: 'asc' },
+      })
+      const events: ProcessedEvent[] = rawEvents.map((r) => ({
+        visitorKey: r.visitorKey,
+        uuid: r.uuid ?? undefined,
+        ip: r.ip ?? undefined,
+        eventTs: r.eventTs,
+        eventType: r.eventType ?? undefined,
+        url: r.url ?? undefined,
+        referrerUrl: r.referrerUrl ?? undefined,
+        timeOnPageMs: r.timeOnPageMs ?? undefined,
+        idleTimeMs: r.idleTimeMs ?? undefined,
+        scrollPct: r.scrollPct ?? undefined,
+        threshold: r.threshold ?? undefined,
+        elementIdentifier: r.elementIdentifier ?? undefined,
+        elementText: r.elementText ?? undefined,
+        title: r.title ?? undefined,
+        coordinates: r.coordinates as { lat: number; lng: number } | null | undefined,
+        rawJson: r.rawJson as Record<string, unknown> | undefined,
+      }))
       await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd)
     }
 
@@ -292,12 +304,12 @@ export async function processCSVUpload(
       where: { id: uploadId },
       data: {
         status: 'completed',
-        rowCount: processedEvents.length,
+        rowCount: totalProcessed,
         processedAt: new Date(),
       },
     })
 
-    return { rowCount: processedEvents.length }
+    return { rowCount: totalProcessed }
   } catch (error: any) {
     console.error('Error processing CSV:', error)
     await prisma.upload.update({
