@@ -43,11 +43,9 @@ export async function GET(request: NextRequest) {
     }).length
     const highIntentVisitors = profiles.filter((p: any) => p.engagementScore >= 6).length
 
-    // New vs Returning (simplified: first_seen_at in window = new)
-    const newVisitors = profiles.filter(
-      (p: any) => p.firstSeenAt >= windowStart && p.firstSeenAt <= windowEnd
-    ).length
-    const returningVisitors = totalVisitors - newVisitors
+    // New vs Returning: returning = repeat visitors (multiple sessions), new = one-time in window
+    const returningVisitors = repeatVisitors
+    const newVisitors = totalVisitors - returningVisitors
 
     // Engagement breakdown
     const engagementBreakdown = {

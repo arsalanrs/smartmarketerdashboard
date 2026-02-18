@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface Visitor {
   id: string
@@ -23,6 +23,7 @@ export default function VisitorMap({ visitors }: VisitorMapProps) {
   const markersRef = useRef<any[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const initializedRef = useRef(false)
+  const [mapReady, setMapReady] = useState(false)
 
   // Initialize map only once
   useEffect(() => {
@@ -39,6 +40,7 @@ export default function VisitorMap({ visitors }: VisitorMapProps) {
 
       mapRef.current = map
       initializedRef.current = true
+      setMapReady(true)
     })
 
     return () => {
@@ -51,9 +53,9 @@ export default function VisitorMap({ visitors }: VisitorMapProps) {
     }
   }, [])
 
-  // Update markers when visitors change
+  // Update markers when visitors change or map becomes ready (fixes empty map on production)
   useEffect(() => {
-    if (!mapRef.current || !initializedRef.current) return
+    if (!mapRef.current || !initializedRef.current || !mapReady) return
 
     import('leaflet').then((L) => {
       // Remove existing markers
@@ -102,7 +104,7 @@ export default function VisitorMap({ visitors }: VisitorMapProps) {
         mapRef.current.fitBounds(bounds, { padding: [20, 20] })
       }
     })
-  }, [visitors])
+  }, [visitors, mapReady])
 
   const coordCount = visitors.filter((v) => v.lat && v.lng).length
 
