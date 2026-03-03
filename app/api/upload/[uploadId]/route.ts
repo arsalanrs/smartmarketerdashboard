@@ -14,6 +14,7 @@ export async function GET(
         id: true,
         status: true,
         rowCount: true,
+        processedRows: true,
         error: true,
         processedAt: true,
         tenantId: true,

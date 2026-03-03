@@ -34,7 +34,6 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Stream file - never load full content into memory (avoids OOM on large CSVs)
     const stream = file.stream()
 
     let result: { rowCount: number; error?: string }

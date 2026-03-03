@@ -91,6 +91,8 @@ function parseRow(row: CSVRow): ProcessedEvent | null {
   let timeOnPageMs: number | undefined
   let idleTimeMs: number | undefined
   let title: string | undefined
+  let scrollPctFromEvent: number | undefined
+  let thresholdFromEvent: string | undefined
 
   if (row['EVENT_DATA']) {
     try {
@@ -109,6 +111,14 @@ function parseRow(row: CSVRow): ProcessedEvent | null {
       // Idle time from EVENT_DATA (already in milliseconds)
       if (eventData?.idleTime) {
         idleTimeMs = Math.max(0, parseInt(eventData.idleTime))
+      }
+      // v4 pixel: scroll_depth stores percentage/threshold inside EVENT_DATA
+      if (eventData?.percentage != null) {
+        const pct = typeof eventData.percentage === 'number' ? eventData.percentage : parseFloat(String(eventData.percentage))
+        if (!Number.isNaN(pct)) scrollPctFromEvent = Math.max(0, Math.min(100, pct))
+      }
+      if (eventData?.threshold != null) {
+        thresholdFromEvent = String(eventData.threshold)
       }
     } catch (e) {
       // If JSON parse fails, continue with fallback columns
@@ -144,8 +154,12 @@ function parseRow(row: CSVRow): ProcessedEvent | null {
     idleTimeMs = idleTime ? Math.max(0, parseInt(idleTime) * 1000) : undefined
   }
 
-  const scrollPct = row['Percentage'] || row['percentage'] || row['scroll_percentage'] || row['SCROLL_PERCENTAGE']
-  const scrollPctNum = scrollPct ? parseFloat(scrollPct) : undefined
+  const scrollPct = scrollPctFromEvent ?? (row['Percentage'] || row['percentage'] || row['scroll_percentage'] || row['SCROLL_PERCENTAGE'])
+  const scrollPctNum =
+    scrollPct != null
+      ? (typeof scrollPct === 'number' ? scrollPct : parseFloat(String(scrollPct)))
+      : undefined
+  const scrollPctNumValid = scrollPctNum != null && !Number.isNaN(scrollPctNum) ? scrollPctNum : undefined
 
   const coordinates = parseCoordinates(
     row['Coordinates'] || row['coordinates'] || undefined
@@ -163,8 +177,8 @@ function parseRow(row: CSVRow): ProcessedEvent | null {
     referrerUrl,
     timeOnPageMs,
     idleTimeMs,
-    scrollPct: scrollPctNum,
-    threshold: row['Threshold'] || row['threshold'] || row['THRESHOLD'] || undefined,
+    scrollPct: scrollPctNumValid,
+    threshold: thresholdFromEvent ?? (row['Threshold'] || row['threshold'] || row['THRESHOLD'] || undefined),
     elementIdentifier: row['Elementidentifier'] || row['Element Identifier'] || row['element_identifier'] || row['ELEMENT_IDENTIFIER'] || undefined,
     elementText: row['Elementtext'] || row['Element Text'] || row['element_text'] || row['ELEMENT_TEXT'] || undefined,
     title,
@@ -249,6 +263,10 @@ export async function processCSVUploadFromStream(
         skipDuplicates: false,
       })
       totalProcessed += toInsert.length
+      await prisma.upload.update({
+        where: { id: uploadId },
+        data: { processedRows: totalProcessed },
+      })
     }
 
     const nodeStream = Readable.fromWeb(stream as any)
@@ -395,6 +413,10 @@ export async function processCSVUpload(
       await prisma.rawEvent.createMany({
         data: batch.map((event) => mapEventToDbRow(event, tenantId, uploadId)),
         skipDuplicates: false,
+      })
+      await prisma.upload.update({
+        where: { id: uploadId },
+        data: { processedRows: totalProcessed },
       })
     }
 

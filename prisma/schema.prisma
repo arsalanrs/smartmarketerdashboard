@@ -24,14 +24,15 @@ model Tenant {
 }
 
 model Upload {
-  id          String   @id @default(uuid())
-  tenantId    String   @map("tenant_id")
-  filename    String
-  status      String   @default("pending") // pending, processing, completed, error
-  rowCount    Int?     @map("row_count")
-  createdAt   DateTime @default(now()) @map("created_at")
-  processedAt DateTime? @map("processed_at")
-  error       String?
+  id             String    @id @default(uuid())
+  tenantId       String    @map("tenant_id")
+  filename       String
+  status         String    @default("pending") // pending, processing, completed, error
+  rowCount       Int?      @map("row_count")
+  processedRows  Int?      @map("processed_rows") // live count during processing (for progress)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  processedAt    DateTime? @map("processed_at")
+  error          String?
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rawEvents RawEvent[]

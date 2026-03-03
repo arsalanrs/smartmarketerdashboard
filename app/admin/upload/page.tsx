@@ -13,6 +13,7 @@ interface UploadStatus {
   id: string
   status: string
   rowCount: number | null
+  processedRows: number | null
   error: string | null
   processedAt: string | null
   tenantId: string
@@ -92,7 +93,8 @@ export default function UploadPage() {
       }
 
       if (status.status === 'processing') {
-        setProgress('Processing CSV file... This may take a few minutes.')
+        const n = status.processedRows ?? 0
+        setProgress(n > 0 ? `Processed ${n.toLocaleString()} rows…` : 'Processing CSV file…')
       }
 
       if (attempts < maxAttempts) {
