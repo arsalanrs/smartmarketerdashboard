@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Readable } from 'stream'
 import Busboy from 'busboy'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+import { randomUUID } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { processCSVUploadFromStream } from '@/lib/csv-processor'
 
@@ -11,13 +15,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Expected multipart/form-data' }, { status: 400 })
     }
 
-    // Use busboy to parse multipart WITHOUT buffering the file into memory.
-    // formData() would load the entire file into the V8 heap before we could stream it.
-    const { tenantId, filename, fileSizeBytes, fileNodeStream } = await new Promise<{
+    // Stream the file to a temp file so we can return 202 immediately and process in background.
+    // That way the client can poll and show "Processing… X%".
+    const { tenantId, filename, fileSizeBytes, tempPath } = await new Promise<{
       tenantId: string
       filename: string
       fileSizeBytes: number | null
-      fileNodeStream: Readable
+      tempPath: string
     }>((resolve, reject) => {
       const bb = Busboy({ headers: { 'content-type': contentType } })
       let tenantId = ''
@@ -33,12 +37,21 @@ export async function POST(request: NextRequest) {
       })
 
       bb.on('file', (name: string, stream: Readable, info: { filename: string }) => {
-        if (name === 'file') {
-          fileReceived = true
-          resolve({ tenantId, filename: info.filename, fileSizeBytes, fileNodeStream: stream })
-        } else {
-          stream.resume() // drain unknown file fields
+        if (name !== 'file') {
+          stream.resume()
+          return
         }
+        fileReceived = true
+        const tempPath = path.join(os.tmpdir(), `upload-${randomUUID()}.csv`)
+        const writeStream = fs.createWriteStream(tempPath)
+        stream.pipe(writeStream)
+        writeStream.on('finish', () => {
+          writeStream.close(() => resolve({ tenantId, filename: info.filename, fileSizeBytes, tempPath }))
+        })
+        writeStream.on('error', (err) => {
+          fs.unlink(tempPath, () => {})
+          reject(err)
+        })
       })
 
       bb.on('finish', () => {
@@ -47,18 +60,17 @@ export async function POST(request: NextRequest) {
 
       bb.on('error', (err: Error) => reject(err))
 
-      // Pipe the request body (Web ReadableStream) into busboy without buffering
       Readable.fromWeb(request.body as any).pipe(bb)
     })
 
     if (!tenantId) {
-      fileNodeStream.resume()
+      fs.unlink(tempPath, () => {})
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 })
     }
 
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } })
     if (!tenant) {
-      fileNodeStream.resume()
+      fs.unlink(tempPath, () => {})
       return NextResponse.json({ error: 'Tenant not found' }, { status: 404 })
     }
 
@@ -66,31 +78,33 @@ export async function POST(request: NextRequest) {
       data: { tenantId, filename, status: 'processing', fileSizeBytes: fileSizeBytes ?? undefined },
     })
 
-    let result: { rowCount: number; error?: string }
-    try {
-      // Pass the Node.js Readable directly - no buffering, true streaming
-      result = await processCSVUploadFromStream(tenantId, upload.id, fileNodeStream)
-      console.log(`Upload ${upload.id} processed:`, result)
-    } catch (error: any) {
-      console.error(`Upload ${upload.id} failed:`, error)
-      await prisma.upload.update({
-        where: { id: upload.id },
-        data: { status: 'error', error: error?.message || 'Processing failed' },
-      })
-      return NextResponse.json(
-        { id: upload.id, status: 'error', error: error?.message },
-        { status: 200 }
-      )
+    // Process in background so we can return 202 and let the client poll for progress
+    const processFromTemp = () => {
+      const readStream = fs.createReadStream(tempPath)
+      processCSVUploadFromStream(tenantId, upload.id, readStream)
+        .then((result) => {
+          console.log(`Upload ${upload.id} processed:`, result)
+        })
+        .catch((error: any) => {
+          console.error(`Upload ${upload.id} failed:`, error)
+          prisma.upload
+            .update({
+              where: { id: upload.id },
+              data: { status: 'error', error: error?.message || 'Processing failed' },
+            })
+            .catch(() => {})
+        })
+        .finally(() => {
+          fs.unlink(tempPath, () => {})
+        })
     }
 
-    const status = result.error ? 'error' : 'completed'
-    return NextResponse.json({
-      id: upload.id,
-      status,
-      rowCount: result.rowCount,
-      error: result.error,
-      message: status === 'completed' ? 'Upload processed' : result.error,
-    })
+    processFromTemp()
+
+    return NextResponse.json(
+      { id: upload.id, status: 'processing', message: 'Upload accepted; processing in background.' },
+      { status: 202 }
+    )
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

@@ -63,9 +63,9 @@ export default function UploadPage() {
 
   const pollUploadStatus = async (uploadId: string, tenantId: string) => {
     setProcessing(true)
-    setProgress('Uploading file...')
+    setProgress('Processing…')
 
-    const maxAttempts = 120 // 2 minutes max (120 * 1 second)
+    const maxAttempts = 900 // 15 minutes max for large CSVs (900 * 1 second)
     let attempts = 0
 
     const poll = async () => {
@@ -148,12 +148,16 @@ export default function UploadPage() {
         body: formData,
       })
 
-      if (res.ok) {
+      if (res.ok || res.status === 202) {
         const data = await res.json()
         setFile(null)
         const fileInput = document.getElementById('file') as HTMLInputElement
         if (fileInput) fileInput.value = ''
-        // If server already returned final status (sync processing), handle it
+        // 202 = accepted, processing in background; poll for progress
+        if (data.status === 'processing' || res.status === 202) {
+          await pollUploadStatus(data.id, selectedTenantId)
+          return
+        }
         if (data.status === 'completed') {
           setProcessing(true)
           setProgress(`Processing complete! Processed ${data.rowCount ?? 0} rows.`)
@@ -164,7 +168,6 @@ export default function UploadPage() {
           setProgress(`Error: ${data.error || 'Unknown error'}`)
           return
         }
-        await pollUploadStatus(data.id, selectedTenantId)
       } else {
         const error = await res.json()
         setProgress(`Upload failed: ${error.error || 'Unknown error'}`)
