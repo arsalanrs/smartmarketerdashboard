@@ -1,44 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Readable } from 'stream'
+import Busboy from 'busboy'
 import { prisma } from '@/lib/prisma'
 import { processCSVUploadFromStream } from '@/lib/csv-processor'
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData()
-    const tenantId = formData.get('tenantId') as string
-    const file = formData.get('file') as File
+    const contentType = request.headers.get('content-type') || ''
+    if (!contentType.includes('multipart/form-data')) {
+      return NextResponse.json({ error: 'Expected multipart/form-data' }, { status: 400 })
+    }
+
+    // Use busboy to parse multipart WITHOUT buffering the file into memory.
+    // formData() would load the entire file into the V8 heap before we could stream it.
+    const { tenantId, filename, fileNodeStream } = await new Promise<{
+      tenantId: string
+      filename: string
+      fileNodeStream: Readable
+    }>((resolve, reject) => {
+      const bb = Busboy({ headers: { 'content-type': contentType } })
+      let tenantId = ''
+      let fileReceived = false
+
+      bb.on('field', (name: string, val: string) => {
+        if (name === 'tenantId') tenantId = val
+      })
+
+      bb.on('file', (name: string, stream: Readable, info: { filename: string }) => {
+        if (name === 'file') {
+          fileReceived = true
+          // Resolve immediately with the stream - it reads lazily from the HTTP body
+          resolve({ tenantId, filename: info.filename, fileNodeStream: stream })
+        } else {
+          stream.resume() // drain unknown file fields
+        }
+      })
+
+      bb.on('finish', () => {
+        if (!fileReceived) reject(new Error('No file field found in form data'))
+      })
+
+      bb.on('error', (err: Error) => reject(err))
+
+      // Pipe the request body (Web ReadableStream) into busboy without buffering
+      Readable.fromWeb(request.body as any).pipe(bb)
+    })
 
     if (!tenantId) {
+      fileNodeStream.resume()
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 })
     }
 
-    if (!file) {
-      return NextResponse.json({ error: 'File is required' }, { status: 400 })
-    }
-
-    // Verify tenant exists
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-    })
-
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } })
     if (!tenant) {
+      fileNodeStream.resume()
       return NextResponse.json({ error: 'Tenant not found' }, { status: 404 })
     }
 
-    // Create upload record
     const upload = await prisma.upload.create({
-      data: {
-        tenantId,
-        filename: file.name,
-        status: 'processing',
-      },
+      data: { tenantId, filename, status: 'processing' },
     })
-
-    const stream = file.stream()
 
     let result: { rowCount: number; error?: string }
     try {
-      result = await processCSVUploadFromStream(tenantId, upload.id, stream)
+      // Pass the Node.js Readable directly - no buffering, true streaming
+      result = await processCSVUploadFromStream(tenantId, upload.id, fileNodeStream)
       console.log(`Upload ${upload.id} processed:`, result)
     } catch (error: any) {
       console.error(`Upload ${upload.id} failed:`, error)
@@ -64,4 +90,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
-

@@ -292,8 +292,10 @@ function mapEventToDbRow(event: ProcessedEvent, tenantId: string, uploadId: stri
 export async function processCSVUploadFromStream(
   tenantId: string,
   uploadId: string,
-  stream: ReadableStream<Uint8Array>
+  stream: ReadableStream<Uint8Array> | Readable
 ): Promise<{ rowCount: number; error?: string }> {
+  // Accept both Web Streams (legacy) and Node.js Readables (from busboy - no buffering)
+  const nodeStream: Readable = stream instanceof Readable ? stream : Readable.fromWeb(stream as any)
   return new Promise((resolve, reject) => {
     const visitorKeys = new Set<string>()
     // Store one compact identity record per visitor key (not the full CSV row)
@@ -317,7 +319,6 @@ export async function processCSVUploadFromStream(
       })
     }
 
-    const nodeStream = Readable.fromWeb(stream as any)
     Papa.parse(nodeStream, {
       header: true,
       skipEmptyLines: true,
