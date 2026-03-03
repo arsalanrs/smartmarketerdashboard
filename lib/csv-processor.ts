@@ -187,6 +187,52 @@ function parseRow(row: CSVRow): ProcessedEvent | null {
   }
 }
 
+/** Compact identity extracted from a single CSV row (only stored once per visitor) */
+interface IdentityData {
+  firstName?: string
+  lastName?: string
+  companyName?: string
+  companyDomain?: string
+  jobTitle?: string
+  seniorityLevel?: string
+  businessEmail?: string
+  phone?: string
+  mobilePhone?: string
+  address?: string
+  companyAddress?: string
+  city?: string
+  state?: string
+  zip?: string
+  country?: string
+}
+
+function extractIdentityFromRow(row: CSVRow): IdentityData {
+  const pick = (...keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = row[k]
+      if (v && v !== '-' && v.trim() !== '') return v.trim()
+    }
+    return undefined
+  }
+  return {
+    firstName:      pick('FIRST_NAME', 'First Name', 'first_name'),
+    lastName:       pick('LAST_NAME', 'Last Name', 'last_name'),
+    companyName:    pick('COMPANY_NAME', 'Company Name', 'company_name'),
+    companyDomain:  pick('COMPANY_DOMAIN', 'Company Domain', 'company_domain'),
+    jobTitle:       pick('JOB_TITLE', 'Job Title', 'job_title'),
+    seniorityLevel: pick('SENIORITY_LEVEL', 'Seniority Level', 'seniority_level'),
+    businessEmail:  pick('BUSINESS_EMAIL', 'Business Email', 'business_email'),
+    phone:          pick('DIRECT_NUMBER', 'Direct Number', 'direct_number'),
+    mobilePhone:    pick('MOBILE_PHONE', 'Mobile Phone', 'mobile_phone'),
+    address:        pick('PERSONAL_ADDRESS', 'Personal Address', 'personal_address'),
+    companyAddress: pick('COMPANY_ADDRESS', 'Company Address', 'company_address'),
+    city:           pick('PERSONAL_CITY', 'Personal City', 'personal_city', 'COMPANY_CITY', 'Company City', 'company_city'),
+    state:          pick('PERSONAL_STATE', 'Personal State', 'personal_state', 'COMPANY_STATE', 'Company State', 'company_state'),
+    zip:            pick('PERSONAL_ZIP', 'Personal Zip', 'personal_zip', 'COMPANY_ZIP', 'Company Zip', 'company_zip'),
+    country:        pick('PERSONAL_COUNTRY', 'Personal Country', 'personal_country', 'COMPANY_COUNTRY', 'Company Country', 'company_country'),
+  }
+}
+
 /**
  * Group events into sessions (30 minute gap threshold)
  */
@@ -236,7 +282,7 @@ function mapEventToDbRow(event: ProcessedEvent, tenantId: string, uploadId: stri
     elementText: event.elementText || null,
     title: event.title || null,
     coordinates: event.coordinates ? (event.coordinates as any) : null,
-    rawJson: event.rawJson || null,
+    // rawJson intentionally omitted (identity extracted separately to save memory)
   }
 }
 
@@ -250,6 +296,8 @@ export async function processCSVUploadFromStream(
 ): Promise<{ rowCount: number; error?: string }> {
   return new Promise((resolve, reject) => {
     const visitorKeys = new Set<string>()
+    // Store one compact identity record per visitor key (not the full CSV row)
+    const identityByVisitor = new Map<string, IdentityData>()
     let minTs = Infinity
     let maxTs = -Infinity
     let totalProcessed = 0
@@ -279,8 +327,15 @@ export async function processCSVUploadFromStream(
         for (const row of rows) {
           const event = parseRow(row)
           if (event) {
+            // Strip rawJson from the event to save memory - identity captured separately
+            event.rawJson = undefined
             batch.push(event)
             visitorKeys.add(event.visitorKey)
+            // Capture identity only once per visitor (first row wins)
+            if (event.visitorKey !== 'unknown' && !identityByVisitor.has(event.visitorKey)) {
+              const id = extractIdentityFromRow(row)
+              identityByVisitor.set(event.visitorKey, id)
+            }
             const t = event.eventTs.getTime()
             if (t < minTs) minTs = t
             if (t > maxTs) maxTs = t
@@ -308,15 +363,23 @@ export async function processCSVUploadFromStream(
             return
           }
 
-          console.log(`Inserted ${totalProcessed} events, ${visitorKeys.size} unique visitors (streaming)`)
+          const realVisitorKeys = [...visitorKeys].filter(k => k !== 'unknown')
+          console.log(`Inserted ${totalProcessed} events, ${realVisitorKeys.length} real visitors + ${visitorKeys.has('unknown') ? 1 : 0} unknown (streaming)`)
 
           const windowEnd = new Date(maxTs)
           const windowStart = new Date(Math.max(minTs, maxTs - 30 * 24 * 60 * 60 * 1000))
 
-          for (const visitorKey of visitorKeys) {
+          for (const visitorKey of realVisitorKeys) {
+            // Fetch events without rawJson (null in DB) to keep memory low
             const rawEvents = await prisma.rawEvent.findMany({
               where: { tenantId, uploadId, visitorKey },
               orderBy: { eventTs: 'asc' },
+              select: {
+                visitorKey: true, uuid: true, ip: true, eventTs: true, eventType: true,
+                url: true, referrerUrl: true, timeOnPageMs: true, idleTimeMs: true,
+                scrollPct: true, threshold: true, elementIdentifier: true,
+                elementText: true, title: true, coordinates: true,
+              },
             })
             const events: ProcessedEvent[] = rawEvents.map((r) => ({
               visitorKey: r.visitorKey,
@@ -334,9 +397,8 @@ export async function processCSVUploadFromStream(
               elementText: r.elementText ?? undefined,
               title: r.title ?? undefined,
               coordinates: r.coordinates as { lat: number; lng: number } | null | undefined,
-              rawJson: r.rawJson as Record<string, unknown> | undefined,
             }))
-            await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd)
+            await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd, identityByVisitor.get(visitorKey))
           }
 
           await prisma.upload.update({
@@ -388,6 +450,7 @@ export async function processCSVUpload(
     console.log(`Parsed ${rows.length} rows from CSV`)
 
     const visitorKeys = new Set<string>()
+    const identityByVisitor = new Map<string, IdentityData>()
     let minTs = Infinity
     let maxTs = -Infinity
     let totalProcessed = 0
@@ -400,8 +463,12 @@ export async function processCSVUpload(
       for (const row of chunk) {
         const event = parseRow(row)
         if (event) {
+          event.rawJson = undefined // don't store full row in DB
           batch.push(event)
           visitorKeys.add(event.visitorKey)
+          if (event.visitorKey !== 'unknown' && !identityByVisitor.has(event.visitorKey)) {
+            identityByVisitor.set(event.visitorKey, extractIdentityFromRow(row))
+          }
           const t = event.eventTs.getTime()
           if (t < minTs) minTs = t
           if (t > maxTs) maxTs = t
@@ -420,7 +487,8 @@ export async function processCSVUpload(
       })
     }
 
-    console.log(`Inserted ${totalProcessed} events, ${visitorKeys.size} unique visitors`)
+    const realVisitorKeys = [...visitorKeys].filter(k => k !== 'unknown')
+    console.log(`Inserted ${totalProcessed} events, ${realVisitorKeys.length} real visitors (non-streaming)`)
 
     if (totalProcessed === 0) {
       const errorMsg = `No valid events found. CSV had ${rows.length} rows but none had valid timestamps. Check that CSV has a timestamp column.`
@@ -434,11 +502,17 @@ export async function processCSVUpload(
     const windowEnd = new Date(maxTs)
     const windowStart = new Date(Math.max(minTs, maxTs - 30 * 24 * 60 * 60 * 1000))
 
-    // Build visitor profiles by fetching from DB one visitor at a time (avoids holding all data in memory)
-    for (const visitorKey of visitorKeys) {
+    // Build visitor profiles one at a time; skip 'unknown' (would load ALL unidentified events at once)
+    for (const visitorKey of realVisitorKeys) {
       const rawEvents = await prisma.rawEvent.findMany({
         where: { tenantId, uploadId, visitorKey },
         orderBy: { eventTs: 'asc' },
+        select: {
+          visitorKey: true, uuid: true, ip: true, eventTs: true, eventType: true,
+          url: true, referrerUrl: true, timeOnPageMs: true, idleTimeMs: true,
+          scrollPct: true, threshold: true, elementIdentifier: true,
+          elementText: true, title: true, coordinates: true,
+        },
       })
       const events: ProcessedEvent[] = rawEvents.map((r) => ({
         visitorKey: r.visitorKey,
@@ -456,9 +530,8 @@ export async function processCSVUpload(
         elementText: r.elementText ?? undefined,
         title: r.title ?? undefined,
         coordinates: r.coordinates as { lat: number; lng: number } | null | undefined,
-        rawJson: r.rawJson as Record<string, unknown> | undefined,
       }))
-      await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd)
+      await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd, identityByVisitor.get(visitorKey))
     }
 
     // Update upload status
@@ -493,7 +566,8 @@ async function processVisitorProfile(
   visitorKey: string,
   events: ProcessedEvent[],
   windowStart: Date,
-  windowEnd: Date
+  windowEnd: Date,
+  preExtractedIdentity?: IdentityData
 ): Promise<void> {
   if (events.length === 0) return
 
@@ -551,65 +625,34 @@ async function processVisitorProfile(
 
   const segment = getEngagementSegment(score)
 
-  // Extract identity overlay first (needed for address-based geo)
-  const firstEvent = events[0]
+  // Extract identity overlay (use pre-extracted compact record; fallback to rawJson for legacy calls)
   const identity: any = {}
-  const raw = firstEvent?.rawJson as Record<string, unknown> | undefined
+  const id = preExtractedIdentity ?? (events[0]?.rawJson ? extractIdentityFromRow(events[0].rawJson as CSVRow) : undefined)
 
-  if (raw) {
-    // Handle both uppercase (Smart Pixel) and mixed case column names
-    if (raw['FIRST_NAME'] || raw['First Name'] || raw['first_name']) {
-      identity.firstName = raw['FIRST_NAME'] || raw['First Name'] || raw['first_name']
-    }
-    if (raw['LAST_NAME'] || raw['Last Name'] || raw['last_name']) {
-      identity.lastName = raw['LAST_NAME'] || raw['Last Name'] || raw['last_name']
-    }
-    if (raw['COMPANY_NAME'] || raw['Company Name'] || raw['company_name']) {
-      identity.companyName = raw['COMPANY_NAME'] || raw['Company Name'] || raw['company_name']
-    }
-    if (raw['COMPANY_DOMAIN'] || raw['Company Domain'] || raw['company_domain']) {
-      identity.companyDomain = raw['COMPANY_DOMAIN'] || raw['Company Domain'] || raw['company_domain']
-    }
-    if (raw['JOB_TITLE'] || raw['Job Title'] || raw['job_title']) {
-      identity.jobTitle = raw['JOB_TITLE'] || raw['Job Title'] || raw['job_title']
-    }
-    if (raw['SENIORITY_LEVEL'] || raw['Seniority Level'] || raw['seniority_level']) {
-      identity.seniorityLevel = raw['SENIORITY_LEVEL'] || raw['Seniority Level'] || raw['seniority_level']
-    }
-    if (raw['BUSINESS_EMAIL'] || raw['Business Email'] || raw['business_email']) {
-      identity.businessEmail = raw['BUSINESS_EMAIL'] || raw['Business Email'] || raw['business_email']
-    }
-    if (raw['DIRECT_NUMBER'] || raw['Direct Number'] || raw['direct_number']) {
-      identity.phone = raw['DIRECT_NUMBER'] || raw['Direct Number'] || raw['direct_number']
-    }
-    if (raw['MOBILE_PHONE'] || raw['Mobile Phone'] || raw['mobile_phone']) {
-      identity.mobilePhone = raw['MOBILE_PHONE'] || raw['Mobile Phone'] || raw['mobile_phone']
-    }
-    // Extract address fields
-    if (raw['PERSONAL_ADDRESS'] || raw['Personal Address'] || raw['personal_address']) {
-      identity.address = raw['PERSONAL_ADDRESS'] || raw['Personal Address'] || raw['personal_address']
-    }
-    if (raw['COMPANY_ADDRESS'] || raw['Company Address'] || raw['company_address']) {
-      identity.companyAddress = raw['COMPANY_ADDRESS'] || raw['Company Address'] || raw['company_address']
-    }
-    if (raw['PERSONAL_CITY'] || raw['Personal City'] || raw['personal_city']) {
-      identity.city = raw['PERSONAL_CITY'] || raw['Personal City'] || raw['personal_city']
-    }
-    if (raw['PERSONAL_STATE'] || raw['Personal State'] || raw['personal_state']) {
-      identity.state = raw['PERSONAL_STATE'] || raw['Personal State'] || raw['personal_state']
-    }
-    if (raw['PERSONAL_ZIP'] || raw['Personal Zip'] || raw['personal_zip']) {
-      identity.zip = raw['PERSONAL_ZIP'] || raw['Personal Zip'] || raw['personal_zip']
-    }
+  if (id) {
+    if (id.firstName)      identity.firstName      = id.firstName
+    if (id.lastName)       identity.lastName       = id.lastName
+    if (id.companyName)    identity.companyName    = id.companyName
+    if (id.companyDomain)  identity.companyDomain  = id.companyDomain
+    if (id.jobTitle)       identity.jobTitle       = id.jobTitle
+    if (id.seniorityLevel) identity.seniorityLevel = id.seniorityLevel
+    if (id.businessEmail)  identity.businessEmail  = id.businessEmail
+    if (id.phone)          identity.phone          = id.phone
+    if (id.mobilePhone)    identity.mobilePhone    = id.mobilePhone
+    if (id.address)        identity.address        = id.address
+    if (id.companyAddress) identity.companyAddress = id.companyAddress
+    if (id.city)           identity.city           = id.city
+    if (id.state)          identity.state          = id.state
+    if (id.zip)            identity.zip            = id.zip
   }
 
   // Get geo: prefer address geocoding when sheet has address (accurate map), else IP-based
   let geo: { lat?: number; lng?: number; city?: string; region?: string; country?: string } = {}
-  const addressFromSheet = (raw?.['PERSONAL_ADDRESS'] || raw?.['Personal Address'] || raw?.['personal_address'] || raw?.['COMPANY_ADDRESS'] || raw?.['Company Address'] || raw?.['company_address']) as string | undefined
-  const cityFromSheet = (raw?.['PERSONAL_CITY'] || raw?.['Personal City'] || raw?.['personal_city'] || raw?.['COMPANY_CITY'] || raw?.['Company City'] || raw?.['company_city']) as string | undefined
-  const stateFromSheet = (raw?.['PERSONAL_STATE'] || raw?.['Personal State'] || raw?.['personal_state'] || raw?.['COMPANY_STATE'] || raw?.['Company State'] || raw?.['company_state']) as string | undefined
-  const zipFromSheet = (raw?.['PERSONAL_ZIP'] || raw?.['Personal Zip'] || raw?.['personal_zip'] || raw?.['COMPANY_ZIP'] || raw?.['Company Zip'] || raw?.['company_zip']) as string | undefined
-  const countryFromSheet = (raw?.['PERSONAL_COUNTRY'] || raw?.['Personal Country'] || raw?.['personal_country'] || raw?.['COMPANY_COUNTRY'] || raw?.['Company Country'] || raw?.['company_country'] || 'US') as string
+  const addressFromSheet  = id?.address || id?.companyAddress
+  const cityFromSheet     = id?.city
+  const stateFromSheet    = id?.state
+  const zipFromSheet      = id?.zip
+  const countryFromSheet  = id?.country || 'US'
   const hasAddressFromSheet = !!(addressFromSheet || cityFromSheet || stateFromSheet || zipFromSheet)
 
   if (hasAddressFromSheet) {
