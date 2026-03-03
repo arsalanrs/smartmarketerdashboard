@@ -14,6 +14,7 @@ interface UploadStatus {
   status: string
   rowCount: number | null
   processedRows: number | null
+  fileSizeBytes: number | null
   error: string | null
   processedAt: string | null
   tenantId: string
@@ -28,6 +29,7 @@ export default function UploadPage() {
   const [processing, setProcessing] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null)
   const [progress, setProgress] = useState<string>('')
+  const [progressPct, setProgressPct] = useState<number | null>(null)
 
   useEffect(() => {
     fetchTenants()
@@ -79,6 +81,7 @@ export default function UploadPage() {
       setUploadStatus(status)
 
       if (status.status === 'completed') {
+        setProgressPct(100)
         setProgress(`Processing complete! Processed ${status.rowCount || 0} rows.`)
         setTimeout(() => {
           router.push(`/dashboard/${tenantId}`)
@@ -87,6 +90,7 @@ export default function UploadPage() {
       }
 
       if (status.status === 'error') {
+        setProgressPct(null)
         setProgress(`Error: ${status.error || 'Unknown error'}`)
         setProcessing(false)
         return
@@ -94,7 +98,15 @@ export default function UploadPage() {
 
       if (status.status === 'processing') {
         const n = status.processedRows ?? 0
-        setProgress(n > 0 ? `Processed ${n.toLocaleString()} rows…` : 'Processing CSV file…')
+        const fileSize = status.fileSizeBytes ?? 0
+        const estimatedRows = fileSize > 0 ? Math.max(1, Math.round(fileSize / 400)) : 0
+        const pct = estimatedRows > 0 && n > 0 ? Math.min(99, Math.round((n / estimatedRows) * 100)) : null
+        setProgressPct(pct)
+        if (pct != null) {
+          setProgress(`Processing… ${pct}% (${n.toLocaleString()} rows)`)
+        } else {
+          setProgress(n > 0 ? `Processed ${n.toLocaleString()} rows…` : 'Processing CSV file…')
+        }
       }
 
       if (attempts < maxAttempts) {
@@ -123,11 +135,13 @@ export default function UploadPage() {
     setUploading(true)
     setUploadStatus(null)
     setProgress('')
+    setProgressPct(null)
 
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('tenantId', selectedTenantId)
+      formData.append('fileSize', String(file.size))
 
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -184,7 +198,15 @@ export default function UploadPage() {
               <h2 className="mb-2 text-xl font-semibold text-gray-900">
                 {uploading ? 'Uploading...' : 'Processing CSV'}
               </h2>
-              <p className="mb-4 text-sm text-gray-600">{progress || 'Please wait...'}</p>
+              <p className="mb-2 text-sm text-gray-600">{progress || 'Please wait...'}</p>
+              {progressPct != null && (
+                <div className="mb-4 w-full rounded-full bg-gray-200">
+                  <div
+                    className="h-2 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${progressPct}%`, backgroundColor: '#1D6E95' }}
+                  />
+                </div>
+              )}
               {uploadStatus && (
                 <div className="mt-4 rounded-md bg-gray-50 p-3 text-left">
                   <div className="text-xs text-gray-500">Status: {uploadStatus.status}</div>

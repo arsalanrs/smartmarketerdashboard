@@ -13,24 +13,29 @@ export async function POST(request: NextRequest) {
 
     // Use busboy to parse multipart WITHOUT buffering the file into memory.
     // formData() would load the entire file into the V8 heap before we could stream it.
-    const { tenantId, filename, fileNodeStream } = await new Promise<{
+    const { tenantId, filename, fileSizeBytes, fileNodeStream } = await new Promise<{
       tenantId: string
       filename: string
+      fileSizeBytes: number | null
       fileNodeStream: Readable
     }>((resolve, reject) => {
       const bb = Busboy({ headers: { 'content-type': contentType } })
       let tenantId = ''
+      let fileSizeBytes: number | null = null
       let fileReceived = false
 
       bb.on('field', (name: string, val: string) => {
         if (name === 'tenantId') tenantId = val
+        if (name === 'fileSize') {
+          const n = parseInt(val, 10)
+          if (!Number.isNaN(n) && n > 0) fileSizeBytes = n
+        }
       })
 
       bb.on('file', (name: string, stream: Readable, info: { filename: string }) => {
         if (name === 'file') {
           fileReceived = true
-          // Resolve immediately with the stream - it reads lazily from the HTTP body
-          resolve({ tenantId, filename: info.filename, fileNodeStream: stream })
+          resolve({ tenantId, filename: info.filename, fileSizeBytes, fileNodeStream: stream })
         } else {
           stream.resume() // drain unknown file fields
         }
@@ -58,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     const upload = await prisma.upload.create({
-      data: { tenantId, filename, status: 'processing' },
+      data: { tenantId, filename, status: 'processing', fileSizeBytes: fileSizeBytes ?? undefined },
     })
 
     let result: { rowCount: number; error?: string }

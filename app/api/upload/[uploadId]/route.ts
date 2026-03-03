@@ -15,6 +15,7 @@ export async function GET(
         status: true,
         rowCount: true,
         processedRows: true,
+        fileSizeBytes: true,
         error: true,
         processedAt: true,
         tenantId: true,
