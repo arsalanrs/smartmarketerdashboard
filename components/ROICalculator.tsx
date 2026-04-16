@@ -35,7 +35,7 @@ function parseMargin(raw: string): number | null {
 
 function ArrowBullet() {
   return (
-    <span className="mr-2 inline-block text-sky-200/90" aria-hidden>
+    <span className="mr-2 inline-block text-[#1D6E95]" aria-hidden>
       ↘
     </span>
   )
@@ -165,10 +165,12 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
   ]
 
   const inputClass =
-    'mt-1 w-full rounded-lg border border-white/40 bg-white/15 px-3 py-2.5 text-white placeholder-white/40 shadow-inner outline-none ring-0 focus:border-white/70 focus:bg-white/20'
+    'mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none placeholder:text-gray-400 focus:border-[#1D6E95] focus:ring-1 focus:ring-[#1D6E95]'
 
-  const labelClass = 'text-sm font-semibold text-white'
-  const helpClass = 'mt-1 text-xs text-white/70'
+  const labelClass = 'text-sm font-semibold text-gray-800'
+  const helpClass = 'mt-1 text-xs text-gray-500'
+  const sectionHeadingClass =
+    'mb-4 text-sm font-semibold uppercase tracking-wide text-[#1D6E95]'
 
   return (
     <div className="mb-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -195,15 +197,10 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
       </button>
 
       {expanded && (
-        <div
-          className="p-5 sm:p-6"
-          style={{
-            background: 'linear-gradient(165deg, #0f3d52 0%, #1d6e95 45%, #2a8ab8 100%)',
-          }}
-        >
+        <div className="border-t border-gray-100 bg-white px-5 py-6 sm:px-6">
           <header className="mb-8 max-w-3xl">
-            <h3 className="text-2xl font-bold text-white">Website Revenue Recovery Forecast</h3>
-            <p className="mt-2 text-sm leading-relaxed text-white/85">
+            <h3 className="text-xl font-bold text-gray-900">Website Revenue Recovery Forecast</h3>
+            <p className="mt-2 text-sm leading-relaxed text-gray-600">
               See how much revenue, pipeline, and long-term customer value may already be sitting
               inside your existing website traffic — and what it could mean for your business if you
               recover it.
@@ -211,9 +208,7 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
           </header>
 
           <section className="mb-10">
-            <h4 className="mb-4 text-sm font-bold uppercase tracking-wide text-white/90">
-              Business inputs
-            </h4>
+            <h4 className={sectionHeadingClass}>Business inputs</h4>
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
               <div>
                 <label className={labelClass}>Average monthly website visitors</label>
@@ -291,9 +286,7 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
           </section>
 
           <section className="mb-10">
-            <h4 className="mb-4 text-sm font-bold uppercase tracking-wide text-white/90">
-              Sales execution
-            </h4>
+            <h4 className={sectionHeadingClass}>Sales execution</h4>
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
               <div>
                 <label className={labelClass}>How fast do you usually follow up with new leads?</label>
@@ -351,10 +344,10 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
           </section>
 
           <section className="mb-10">
-            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-white">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-800">
               <input
                 type="checkbox"
-                className="size-4 rounded border-white/50 bg-white/20 text-[#FF8C02] focus:ring-[#FF8C02]"
+                className="size-4 rounded border-gray-300 text-[#FF8C02] focus:ring-[#FF8C02]"
                 checked={form.showAdvanced}
                 onChange={(e) => update('showAdvanced', e.target.checked)}
               />
@@ -362,8 +355,8 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
             </label>
 
             {form.showAdvanced && (
-              <div className="mt-6 rounded-xl border border-white/25 bg-white/10 p-5 backdrop-blur-sm">
-                <h5 className="mb-4 text-sm font-bold text-white">Advanced assumptions</h5>
+              <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-5">
+                <h5 className="mb-4 text-sm font-semibold text-gray-900">Advanced assumptions</h5>
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
                   <div>
                     <label className={labelClass}>Visitor identification rate (%)</label>
@@ -412,10 +405,10 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
           </section>
 
           {/* Results */}
-          <div className="rounded-2xl border border-white/20 bg-black/15 p-6 backdrop-blur-md sm:p-8">
+          <div className="mt-2 border-t border-gray-200 pt-8">
             <header className="mb-8 max-w-3xl">
-              <h3 className="text-2xl font-bold text-white">Your Revenue Recovery Forecast</h3>
-              <p className="mt-2 text-sm leading-relaxed text-white/80">
+              <h3 className="text-xl font-bold text-gray-900">Your Revenue Recovery Forecast</h3>
+              <p className="mt-2 text-sm leading-relaxed text-gray-600">
                 Based on your traffic, deal value, and sales process, this forecast shows what
                 recovering more of your existing website traffic could potentially add in
                 opportunities, customers, revenue, and profit.
@@ -423,21 +416,24 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
             </header>
 
             <div className="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {topMetrics.map((m) => (
+              {topMetrics.map((m, idx) => (
                 <div
                   key={m.title}
-                  className="rounded-xl border border-white/20 bg-white/10 p-4 shadow-lg"
+                  className="overflow-hidden rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
                 >
-                  <p className="text-2xl font-bold tabular-nums text-white">{m.value}</p>
-                  <p className="mt-2 text-sm font-semibold text-white">{m.title}</p>
-                  <p className="mt-1 text-xs leading-snug text-white/70">{m.desc}</p>
+                  <p
+                    className="text-2xl font-bold tabular-nums sm:text-3xl"
+                    style={{ color: idx % 2 === 0 ? '#1D6E95' : '#FF8C02' }}
+                  >
+                    {m.value}
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-gray-700">{m.title}</p>
+                  <p className="mt-1 text-xs leading-snug text-gray-500">{m.desc}</p>
                 </div>
               ))}
             </div>
 
-            <h4 className="mb-4 text-sm font-bold uppercase tracking-wide text-white/90">
-              Scenario comparison
-            </h4>
+            <h4 className={sectionHeadingClass}>Scenario comparison</h4>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               {(Object.keys(SCENARIO_LABELS) as ScenarioKey[]).map((key) => {
                 const s = forecast.scenarios[key]
@@ -452,19 +448,22 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
                 return (
                   <div
                     key={key}
-                    className="rounded-xl border border-white/20 bg-white/10 p-5 backdrop-blur-sm"
+                    className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
                   >
-                    <p className="mb-4 text-center text-base font-bold text-white">
+                    <p className="mb-4 text-center text-base font-bold text-[#1D6E95]">
                       {SCENARIO_LABELS[key]}
                     </p>
-                    <ul className="space-y-3 text-sm text-white/90">
+                    <ul className="space-y-3 text-sm text-gray-700">
                       {rows.map(([lab, val]) => (
-                        <li key={lab} className="flex flex-col border-b border-white/10 pb-2 last:border-0">
+                        <li
+                          key={lab}
+                          className="flex flex-col border-b border-gray-100 pb-2 last:border-0"
+                        >
                           <span className="flex items-start">
                             <ArrowBullet />
-                            <span className="text-white/70">{lab}</span>
+                            <span className="text-gray-500">{lab}</span>
                           </span>
-                          <span className="pl-6 font-semibold text-white">{val}</span>
+                          <span className="pl-6 font-semibold text-gray-900">{val}</span>
                         </li>
                       ))}
                     </ul>
@@ -473,20 +472,20 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
               })}
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <span className="rounded-full bg-white/15 px-3 py-1 text-xs text-white/90">
+              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-700">
                 Conservative = lower-range planning case
               </span>
-              <span className="rounded-full bg-white/15 px-3 py-1 text-xs text-white/90">
+              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-700">
                 Expected = realistic revenue forecast
               </span>
-              <span className="rounded-full bg-white/15 px-3 py-1 text-xs text-white/90">
+              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-700">
                 Upside = stronger execution and follow-up case
               </span>
             </div>
 
-            <div className="mt-10 rounded-xl border border-white/20 bg-white/10 p-5">
-              <h5 className="mb-3 text-sm font-bold text-white">Forecast assumptions used</h5>
-              <ul className="space-y-2 text-sm text-white/85">
+            <div className="mt-10 rounded-xl border border-gray-200 bg-gray-50 p-5">
+              <h5 className="mb-3 text-sm font-semibold text-gray-900">Forecast assumptions used</h5>
+              <ul className="space-y-2 text-sm text-gray-700">
                 {assumptionLines.map((line) => (
                   <li key={line} className="flex items-start">
                     <ArrowBullet />
@@ -496,7 +495,7 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
               </ul>
             </div>
 
-            <p className="mt-6 text-xs text-white/60">
+            <p className="mt-6 text-xs text-gray-500">
               These are estimates based on your inputs and the assumptions above — not a guarantee of
               results.
             </p>
