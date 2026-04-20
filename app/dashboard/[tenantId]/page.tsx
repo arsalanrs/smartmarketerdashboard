@@ -9,10 +9,12 @@ import EngagementBreakdown from '@/components/EngagementBreakdown'
 import VisitorMap from '@/components/VisitorMap'
 import VisitorList from '@/components/VisitorList'
 import AISummary from '@/components/AISummary'
+import RevenueEstimator from '@/components/RevenueEstimator'
 
 interface DashboardData {
   windowStart: string
   windowEnd: string
+  latestUploadId: string | null
   metrics: {
     totalVisitors: number
     engagedVisitors: number
@@ -66,6 +68,7 @@ export default function DashboardPage() {
   const [window, setWindow] = useState('L30')
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [revenueExpanded, setRevenueExpanded] = useState(true)
 
   useEffect(() => {
     if (tenantId) {
@@ -156,6 +159,7 @@ export default function DashboardPage() {
           >
             <option value="L7">Last 7 days</option>
             <option value="L30">Last 30 days</option>
+            <option value="L60">Last 60 days</option>
             <option value="L90">Last 90 days</option>
           </select>
         </div>
@@ -172,6 +176,38 @@ export default function DashboardPage() {
         reportWindow={window}
         metrics={data.metrics}
       />
+
+      {data.latestUploadId && (
+        <div className="mb-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <button
+            type="button"
+            onClick={() => setRevenueExpanded((e) => !e)}
+            className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-5 py-4 text-left transition hover:bg-gray-50"
+          >
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Revenue estimate</h2>
+              <p className="text-xs text-gray-500">
+                From your latest processed pixel upload — match rate, close rate, and deal size (same
+                model as the upload page).
+              </p>
+            </div>
+            <span
+              className={`ml-2 text-gray-500 transition-transform ${revenueExpanded ? 'rotate-180' : ''}`}
+              aria-hidden
+            >
+              ▼
+            </span>
+          </button>
+          {revenueExpanded && (
+            <RevenueEstimator
+              key={data.latestUploadId}
+              uploadId={data.latestUploadId}
+              tenantId={tenantId}
+              embedded
+            />
+          )}
+        </div>
+      )}
 
       {/* Engagement Breakdown */}
       <div className="mb-6">

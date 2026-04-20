@@ -24,6 +24,7 @@ export async function GET(
         totalEvents: true,
         uniqueVisitors: true,
         highIntentCount: true,
+        pixelExportFormat: true,
       },
     })
 

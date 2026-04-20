@@ -36,6 +36,9 @@ yarn-error.log*
 # local secrets — never commit
 githubtoken
 
+# local pixel export dumps (often large / sensitive)
+pixel_export_*.csv
+
 # vercel
 .vercel
 

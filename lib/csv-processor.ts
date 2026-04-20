@@ -3,6 +3,7 @@ import Papa from 'papaparse'
 import { prisma } from './prisma'
 import { parseCoordinates, getGeoLocation } from './geo'
 import { calculateEngagementScore, getEngagementSegment, isKeyPage, isCTAClick, isExitIntent, isVideoEngaged, VisitorFlags } from './scoring'
+import type { PixelExportFormat } from './pixel-format'
 
 export interface CSVRow {
   [key: string]: string | undefined
@@ -71,67 +72,122 @@ function getTimestampFromRow(row: CSVRow): Date | null {
   return null
 }
 
+interface EventDataExtracted {
+  url?: string
+  referrerUrl?: string
+  title?: string
+  timeOnPageMs?: number
+  idleTimeMs?: number
+  scrollPctFromEvent?: number
+  thresholdFromEvent?: string
+}
+
+function extractEventDataFromRow(row: CSVRow): EventDataExtracted {
+  const out: EventDataExtracted = {}
+  if (!row['EVENT_DATA']) return out
+  try {
+    const eventDataStr =
+      typeof row['EVENT_DATA'] === 'string' ? row['EVENT_DATA'] : JSON.stringify(row['EVENT_DATA'])
+    const eventData = JSON.parse(eventDataStr)
+
+    out.url = eventData?.url || undefined
+    out.referrerUrl = eventData?.referrer || undefined
+    out.title = eventData?.title || undefined
+
+    if (eventData?.timeOnPage) {
+      out.timeOnPageMs = Math.max(0, Math.min(600000, parseInt(eventData.timeOnPage)))
+    }
+    if (eventData?.idleTime) {
+      out.idleTimeMs = Math.max(0, parseInt(eventData.idleTime))
+    }
+    if (eventData?.percentage != null) {
+      const pct =
+        typeof eventData.percentage === 'number'
+          ? eventData.percentage
+          : parseFloat(String(eventData.percentage))
+      if (!Number.isNaN(pct)) out.scrollPctFromEvent = Math.max(0, Math.min(100, pct))
+    }
+    if (eventData?.threshold != null) {
+      out.thresholdFromEvent = String(eventData.threshold)
+    }
+  } catch {
+    // invalid JSON — column fallbacks only
+  }
+  return out
+}
+
+function pickUrlFromColumns(row: CSVRow, pixelFormat: PixelExportFormat): string | undefined {
+  if (pixelFormat === 'v4') {
+    return (
+      row['FULL_URL'] ||
+      row['Full Url'] ||
+      row['full_url'] ||
+      row['URL'] ||
+      row['Url'] ||
+      row['url'] ||
+      undefined
+    )
+  }
+  return (
+    row['URL'] ||
+    row['Url'] ||
+    row['url'] ||
+    row['FULL_URL'] ||
+    row['Full Url'] ||
+    row['full_url'] ||
+    undefined
+  )
+}
+
+function pickReferrerFromColumns(row: CSVRow): string | undefined {
+  return (
+    row['REFERRER_URL'] ||
+    row['Referrer Url'] ||
+    row['Referrer'] ||
+    row['referrer_url'] ||
+    row['referrer'] ||
+    undefined
+  )
+}
+
 /**
- * Parse CSV row into ProcessedEvent
+ * Parse CSV row into ProcessedEvent.
+ * Supports:
+ * - **Pixel v3**: EVENT_TYPE, EVENT_DATA (JSON), URL/REFERRER, IP_ADDRESS, ACTIVITY_* dates, etc.
+ * - **Pixel v4**: Enriched export with FULL_URL + REFERRER_URL + HEM_SHA256; often no EVENT_TYPE / EVENT_DATA / IP.
+ * `pixelFormat` controls URL/referrer precedence when both EVENT_DATA and columns are present.
  */
-function parseRow(row: CSVRow): ProcessedEvent | null {
+function parseRow(row: CSVRow, pixelFormat: PixelExportFormat): ProcessedEvent | null {
   const eventTs = getTimestampFromRow(row)
   if (!eventTs) return null
 
   const hemSha256 = row['HEM_SHA256'] || row['Hem Sha256'] || row['hem_sha256'] || undefined
   const uuid = row['UUID'] || row['Uuid'] || row['uuid'] || undefined
   const ip = row['IP_ADDRESS'] || row['Ip Address'] || row['ip_address'] || row['ip'] || undefined
-  // HEM_SHA256 (hashed email) is primary in Smart Pixel exports; many rows share IP so uuid/ip alone would collapse visitors
-  const visitorKey = hemSha256 || uuid || ip || 'unknown'
+  const edid =
+    row['EDID']?.trim() || row['Edid']?.trim() || row['edid']?.trim() || undefined
+  // HEM_SHA256 (hashed email) is primary in Smart Pixel exports; v4 may omit IP — EDID is last-resort key
+  const visitorKey = hemSha256 || uuid || ip || edid || 'unknown'
 
-  // Parse EVENT_DATA JSON if present (Smart Pixel format)
-  let eventData: any = null
+  const ed = extractEventDataFromRow(row)
+  const colUrl = pickUrlFromColumns(row, pixelFormat)
+  const colRef = pickReferrerFromColumns(row)
+
   let url: string | undefined
   let referrerUrl: string | undefined
-  let timeOnPageMs: number | undefined
-  let idleTimeMs: number | undefined
-  let title: string | undefined
-  let scrollPctFromEvent: number | undefined
-  let thresholdFromEvent: string | undefined
-
-  if (row['EVENT_DATA']) {
-    try {
-      const eventDataStr = typeof row['EVENT_DATA'] === 'string' ? row['EVENT_DATA'] : JSON.stringify(row['EVENT_DATA'])
-      eventData = JSON.parse(eventDataStr)
-      
-      url = eventData?.url || undefined
-      referrerUrl = eventData?.referrer || undefined
-      title = eventData?.title || undefined
-      
-      // Time on page from EVENT_DATA (already in milliseconds)
-      if (eventData?.timeOnPage) {
-        timeOnPageMs = Math.max(0, Math.min(600000, parseInt(eventData.timeOnPage)))
-      }
-      
-      // Idle time from EVENT_DATA (already in milliseconds)
-      if (eventData?.idleTime) {
-        idleTimeMs = Math.max(0, parseInt(eventData.idleTime))
-      }
-      // v4 pixel: scroll_depth stores percentage/threshold inside EVENT_DATA
-      if (eventData?.percentage != null) {
-        const pct = typeof eventData.percentage === 'number' ? eventData.percentage : parseFloat(String(eventData.percentage))
-        if (!Number.isNaN(pct)) scrollPctFromEvent = Math.max(0, Math.min(100, pct))
-      }
-      if (eventData?.threshold != null) {
-        thresholdFromEvent = String(eventData.threshold)
-      }
-    } catch (e) {
-      // If JSON parse fails, continue with fallback columns
-    }
+  if (pixelFormat === 'v4') {
+    url = colUrl || ed.url
+    referrerUrl = colRef || ed.referrerUrl
+  } else {
+    url = ed.url || colUrl
+    referrerUrl = ed.referrerUrl || colRef
   }
 
-  // Fallback to direct columns if EVENT_DATA doesn't have them
-  if (!url) {
-    url = row['URL'] || row['Url'] || row['url'] || undefined
-  }
-  if (!referrerUrl) {
-    referrerUrl = row['REFERRER_URL'] || row['Referrer Url'] || row['Referrer'] || row['referrer_url'] || row['referrer'] || undefined
-  }
+  let timeOnPageMs = ed.timeOnPageMs
+  let idleTimeMs = ed.idleTimeMs
+  let title = ed.title
+  let scrollPctFromEvent = ed.scrollPctFromEvent
+  let thresholdFromEvent = ed.thresholdFromEvent
   if (!timeOnPageMs) {
     const timeOnPage = row['Timeonpage'] || row['time_on_page'] || row['timeonpage'] || row['TIME_ON_PAGE']
     timeOnPageMs = timeOnPage ? Math.max(0, Math.min(600000, parseInt(timeOnPage) * 1000)) : undefined
@@ -165,7 +221,11 @@ function parseRow(row: CSVRow): ProcessedEvent | null {
     row['Coordinates'] || row['coordinates'] || undefined
   )
 
-  const eventType = row['EVENT_TYPE'] || row['Event Type'] || row['event_type'] || undefined
+  let eventType = row['EVENT_TYPE'] || row['Event Type'] || row['event_type'] || undefined
+  // v4 rows are typically one enriched record per page touch — treat as page_view when URL exists but type is absent
+  if (!eventType && url) {
+    eventType = 'page_view'
+  }
 
   return {
     visitorKey,
@@ -326,8 +386,10 @@ async function finalizeCompletedUpload(args: {
 export async function processCSVUploadFromStream(
   tenantId: string,
   uploadId: string,
-  stream: ReadableStream<Uint8Array> | Readable
+  stream: ReadableStream<Uint8Array> | Readable,
+  options?: { pixelFormat?: PixelExportFormat }
 ): Promise<{ rowCount: number; error?: string }> {
+  const pixelFormat: PixelExportFormat = options?.pixelFormat ?? 'v3'
   // Accept both Web Streams (legacy) and Node.js Readables (from busboy - no buffering)
   const nodeStream: Readable = stream instanceof Readable ? stream : Readable.fromWeb(stream as any)
   return new Promise((resolve, reject) => {
@@ -360,7 +422,7 @@ export async function processCSVUploadFromStream(
       step(results: { data: CSVRow | CSVRow[] }, parser: { pause: () => void; resume: () => void }) {
         const rows = Array.isArray(results.data) ? results.data : [results.data].filter(Boolean) as CSVRow[]
         for (const row of rows) {
-          const event = parseRow(row)
+          const event = parseRow(row, pixelFormat)
           if (event) {
             // Strip rawJson from the event to save memory - identity captured separately
             event.rawJson = undefined
@@ -473,8 +535,10 @@ export async function processCSVUploadFromStream(
 export async function processCSVUpload(
   tenantId: string,
   uploadId: string,
-  csvContent: string
+  csvContent: string,
+  options?: { pixelFormat?: PixelExportFormat }
 ): Promise<{ rowCount: number; error?: string }> {
+  const pixelFormat: PixelExportFormat = options?.pixelFormat ?? 'v3'
   try {
     // Parse CSV
     const parseResult = Papa.parse<CSVRow>(csvContent, {
@@ -502,7 +566,7 @@ export async function processCSVUpload(
       const chunk = rows.slice(i, i + insertBatchSize)
       const batch: ProcessedEvent[] = []
       for (const row of chunk) {
-        const event = parseRow(row)
+        const event = parseRow(row, pixelFormat)
         if (event) {
           event.rawJson = undefined // don't store full row in DB
           batch.push(event)

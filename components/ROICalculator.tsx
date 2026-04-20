@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   computeRoiForecast,
   DEFAULT_GROSS_MARGIN_PCT,
@@ -79,6 +79,17 @@ export default function ROICalculator({ tenantId, reportWindow, metrics }: ROICa
     if (!hydrated) return
     localStorage.setItem(roiStorageKey(tenantId), JSON.stringify(form))
   }, [form, hydrated, tenantId])
+
+  const lastReportWindowRef = useRef(reportWindow)
+  useEffect(() => {
+    if (!hydrated) return
+    if (lastReportWindowRef.current === reportWindow) return
+    lastReportWindowRef.current = reportWindow
+    const approx = monthlyVisitorsFromWindow(metrics.totalVisitors, reportWindow)
+    if (approx > 0) {
+      setForm((f) => ({ ...f, monthlyVisitors: approx }))
+    }
+  }, [hydrated, reportWindow, metrics.totalVisitors])
 
   const update = useCallback(
     <K extends keyof RoiCalculatorStoredState>(key: K, value: RoiCalculatorStoredState[K]) => {

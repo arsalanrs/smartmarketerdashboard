@@ -39,6 +39,7 @@ model Upload {
   totalEvents     Int?      @map("total_events")
   uniqueVisitors  Int?      @map("unique_visitors") // distinct visitorKeys (excl. 'unknown')
   highIntentCount Int?      @map("high_intent_count") // profiles with engagementScore >= 6 for this window
+  pixelExportFormat String? @map("pixel_export_format") // v3 | v4 — how rows were interpreted
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rawEvents RawEvent[]

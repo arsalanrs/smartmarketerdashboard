@@ -6,6 +6,10 @@ import {
   normalizeRevenueInsights,
 } from '@/lib/ai-summary'
 import { prisma } from '@/lib/prisma'
+import {
+  loadProfilesActiveInCalendarWindow,
+  parseDashboardWindowParam,
+} from '@/lib/dashboard-window'
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,15 +21,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 })
     }
 
-    // Calculate time window
-    const windowEnd = new Date()
-    let windowStart: Date
-    if (window.startsWith('L')) {
-      const days = parseInt(window.substring(1)) || 30
-      windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000)
-    } else {
-      windowStart = new Date(windowEnd.getTime() - 30 * 24 * 60 * 60 * 1000)
-    }
+    const { windowStart, windowEnd } = parseDashboardWindowParam(window)
 
     // Get existing summary
     const summary = await prisma.tenantSummary.findUnique({
@@ -66,26 +62,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 })
     }
 
-    // Calculate time window
-    const windowEnd = new Date()
-    let windowStart: Date
-    if (window.startsWith('L')) {
-      const days = parseInt(window.substring(1)) || 30
-      windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000)
-    } else {
-      windowStart = new Date(windowEnd.getTime() - 30 * 24 * 60 * 60 * 1000)
-    }
+    const { windowStart, windowEnd } = parseDashboardWindowParam(window)
 
-    // Get dashboard metrics (reuse dashboard query logic)
-    // Profiles are stored with their own windowStart/windowEnd based on event timestamps
-    // We want profiles where the profile window overlaps with the requested window
-    const profiles = await prisma.visitorProfile.findMany({
-      where: {
-        tenantId,
-        windowStart: { lte: windowEnd },
-        windowEnd: { gte: windowStart },
-      },
-    })
+    const profiles = await loadProfilesActiveInCalendarWindow(tenantId, windowStart, windowEnd)
 
     const totalVisitors = profiles.length
     const engagedVisitors = profiles.filter((p: any) => p.engagementScore >= 3).length

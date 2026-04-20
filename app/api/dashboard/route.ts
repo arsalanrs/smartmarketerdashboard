@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import {
+  loadProfilesActiveInCalendarWindow,
+  parseDashboardWindowParam,
+} from '@/lib/dashboard-window'
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,27 +15,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 })
     }
 
-    // Calculate time window
-    const windowEnd = new Date()
-    let windowStart: Date
-    if (window.startsWith('L')) {
-      const days = parseInt(window.substring(1)) || 30
-      windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000)
-    } else {
-      // Could support custom date ranges here
-      windowStart = new Date(windowEnd.getTime() - 30 * 24 * 60 * 60 * 1000)
-    }
+    const { windowStart, windowEnd } = parseDashboardWindowParam(window)
 
-    // Get visitor profiles for window
-    // Profiles are stored with their own windowStart/windowEnd based on event timestamps
-    // We want profiles where the profile window overlaps with the requested window
-    // Profile overlaps if: profile.windowStart <= requested.windowEnd AND profile.windowEnd >= requested.windowStart
-    const profiles = await prisma.visitorProfile.findMany({
-      where: {
-        tenantId,
-        windowStart: { lte: windowEnd },
-        windowEnd: { gte: windowStart },
-      },
+    const profiles = await loadProfilesActiveInCalendarWindow(tenantId, windowStart, windowEnd)
+
+    const latestUpload = await prisma.upload.findFirst({
+      where: { tenantId, status: 'completed' },
+      orderBy: [{ processedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true },
     })
 
     // Calculate KPIs
@@ -139,6 +130,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       windowStart,
       windowEnd,
+      latestUploadId: latestUpload?.id ?? null,
       metrics: {
         totalVisitors,
         engagedVisitors,

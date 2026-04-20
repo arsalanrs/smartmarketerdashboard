@@ -19,6 +19,8 @@ function formatBannerDate(iso: string) {
 export interface RevenueEstimatorProps {
   uploadId: string
   tenantId: string
+  /** Use inside another bordered panel (removes duplicate card chrome) */
+  embedded?: boolean
 }
 
 interface UploadPayload {
@@ -30,9 +32,10 @@ interface UploadPayload {
   totalEvents: number | null
   uniqueVisitors: number | null
   highIntentCount: number | null
+  pixelExportFormat?: string | null
 }
 
-export default function RevenueEstimator({ uploadId }: RevenueEstimatorProps) {
+export default function RevenueEstimator({ uploadId, embedded = false }: RevenueEstimatorProps) {
   const [upload, setUpload] = useState<UploadPayload | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -150,13 +153,22 @@ export default function RevenueEstimator({ uploadId }: RevenueEstimatorProps) {
       </p>
     )
 
+  const shellClass = embedded
+    ? 'bg-white px-5 py-6 sm:px-6'
+    : 'rounded-xl border border-gray-200 bg-white p-6 shadow-sm'
+
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+    <div className={shellClass}>
       <div className="mb-6 rounded-lg border border-[#1D6E95]/20 bg-[#1D6E95]/5 px-4 py-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-[#1D6E95]">
           Based on your actual pixel data
         </p>
         <div className="mt-2">{dateCallout}</div>
+        {upload.pixelExportFormat && (
+          <p className="mt-2 text-xs text-gray-600">
+            Import used <strong>Pixel {upload.pixelExportFormat}</strong> column rules.
+          </p>
+        )}
       </div>
 
       {showSmallSample && (
