@@ -35,7 +35,7 @@ interface UploadPayload {
   pixelExportFormat?: string | null
 }
 
-export default function RevenueEstimator({ uploadId, embedded = false }: RevenueEstimatorProps) {
+export default function RevenueEstimator({ uploadId, tenantId, embedded = false }: RevenueEstimatorProps) {
   const [upload, setUpload] = useState<UploadPayload | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -48,9 +48,17 @@ export default function RevenueEstimator({ uploadId, embedded = false }: Revenue
     let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch(`/api/upload/${uploadId}`)
+        const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : ''
+        const res = await fetch(`/api/upload/${uploadId}${qs}`)
         if (!res.ok) {
-          setLoadError('Could not load upload details.')
+          let msg = 'Could not load upload details.'
+          try {
+            const errBody = (await res.json()) as { error?: string }
+            if (errBody?.error) msg = errBody.error
+          } catch {
+            /* keep default */
+          }
+          setLoadError(msg)
           return
         }
         const data = (await res.json()) as UploadPayload
@@ -84,7 +92,7 @@ export default function RevenueEstimator({ uploadId, embedded = false }: Revenue
     return () => {
       cancelled = true
     }
-  }, [uploadId])
+  }, [uploadId, tenantId])
 
   const derived = useMemo(() => {
     const unique = upload?.uniqueVisitors ?? 0
