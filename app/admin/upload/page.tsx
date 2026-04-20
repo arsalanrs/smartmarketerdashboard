@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import RevenueEstimator from '@/components/RevenueEstimator'
 
 interface Tenant {
   id: string
@@ -21,7 +22,6 @@ interface UploadStatus {
 }
 
 export default function UploadPage() {
-  const router = useRouter()
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [selectedTenantId, setSelectedTenantId] = useState<string>('')
   const [file, setFile] = useState<File | null>(null)
@@ -30,6 +30,7 @@ export default function UploadPage() {
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null)
   const [progress, setProgress] = useState<string>('')
   const [progressPct, setProgressPct] = useState<number | null>(null)
+  const [completedUploadId, setCompletedUploadId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchTenants()
@@ -64,8 +65,9 @@ export default function UploadPage() {
   const pollUploadStatus = async (uploadId: string, tenantId: string) => {
     setProcessing(true)
     setProgress('Processing…')
+    setCompletedUploadId(null)
 
-    const maxAttempts = 900 // 15 minutes max for large CSVs (900 * 1 second)
+    const maxAttempts = 900
     let attempts = 0
 
     const poll = async () => {
@@ -83,9 +85,8 @@ export default function UploadPage() {
       if (status.status === 'completed') {
         setProgressPct(100)
         setProgress(`Processing complete! Processed ${status.rowCount || 0} rows.`)
-        setTimeout(() => {
-          router.push(`/dashboard/${tenantId}`)
-        }, 2000)
+        setProcessing(false)
+        setCompletedUploadId(status.id)
         return
       }
 
@@ -110,7 +111,7 @@ export default function UploadPage() {
       }
 
       if (attempts < maxAttempts) {
-        setTimeout(poll, 1000) // Poll every second
+        setTimeout(poll, 1000)
       } else {
         setProgress('Processing is taking longer than expected. You can check the dashboard later.')
         setProcessing(false)
@@ -136,6 +137,7 @@ export default function UploadPage() {
     setUploadStatus(null)
     setProgress('')
     setProgressPct(null)
+    setCompletedUploadId(null)
 
     try {
       const formData = new FormData()
@@ -153,15 +155,15 @@ export default function UploadPage() {
         setFile(null)
         const fileInput = document.getElementById('file') as HTMLInputElement
         if (fileInput) fileInput.value = ''
-        // 202 = accepted, processing in background; poll for progress
         if (data.status === 'processing' || res.status === 202) {
           await pollUploadStatus(data.id, selectedTenantId)
           return
         }
         if (data.status === 'completed') {
-          setProcessing(true)
           setProgress(`Processing complete! Processed ${data.rowCount ?? 0} rows.`)
-          setTimeout(() => router.push(`/dashboard/${selectedTenantId}`), 2000)
+          setProgressPct(100)
+          setProcessing(false)
+          setCompletedUploadId(data.id)
           return
         }
         if (data.status === 'error') {
@@ -180,23 +182,24 @@ export default function UploadPage() {
     }
   }
 
+  const showOverlay = uploading || (processing && uploadStatus?.status !== 'completed')
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <h1 className="mb-6 text-2xl font-bold text-gray-900">Upload CSV</h1>
 
-      {/* Loading/Processing Overlay */}
-      {(uploading || processing) && (
+      {showOverlay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="rounded-lg bg-white p-8 shadow-xl max-w-md w-full mx-4">
+          <div className="mx-4 w-full max-w-md rounded-lg bg-white p-8 shadow-xl">
             <div className="text-center">
               <div className="mb-4">
-                <div 
+                <div
                   className="mx-auto h-12 w-12 animate-spin rounded-full border-4"
-                  style={{ 
+                  style={{
                     borderColor: 'rgba(29, 110, 149, 0.2)',
-                    borderTopColor: '#1D6E95'
+                    borderTopColor: '#1D6E95',
                   }}
-                ></div>
+                />
               </div>
               <h2 className="mb-2 text-xl font-semibold text-gray-900">
                 {uploading ? 'Uploading...' : 'Processing CSV'}
@@ -281,13 +284,29 @@ export default function UploadPage() {
         </form>
       </div>
 
+      {completedUploadId && selectedTenantId && (
+        <div className="mt-8">
+          <h2 className="mb-4 text-lg font-semibold text-gray-900">Revenue estimate</h2>
+          <RevenueEstimator uploadId={completedUploadId} tenantId={selectedTenantId} />
+          <div className="mt-6">
+            <Link
+              href={`/dashboard/${selectedTenantId}`}
+              className="inline-flex items-center rounded-md px-4 py-2 text-sm font-medium text-white btn-primary-blue"
+            >
+              Go to Dashboard →
+            </Link>
+          </div>
+        </div>
+      )}
+
       <div className="mt-8">
         <h2 className="mb-4 text-lg font-semibold">Upload Instructions</h2>
         <div className="rounded-lg border bg-gray-50 p-4">
           <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">
             <li>CSV should include columns: Event Timestamp, Event Type, Uuid, Ip Address, Url, etc.</li>
             <li>Processing may take a few minutes for large files (50k+ rows)</li>
-            <li>You will be redirected to the dashboard automatically when processing completes</li>
+            <li>When processing finishes, a revenue estimate from your pixel data appears below</li>
+            <li>Use <strong>Go to Dashboard</strong> when you are ready to leave this page</li>
             <li>System will automatically geolocate IPs, compute scores, and generate AI summaries</li>
           </ul>
         </div>
@@ -295,4 +314,3 @@ export default function UploadPage() {
     </div>
   )
 }
-

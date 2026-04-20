@@ -286,6 +286,40 @@ function mapEventToDbRow(event: ProcessedEvent, tenantId: string, uploadId: stri
   }
 }
 
+/** After visitor profiles are upserted, persist upload stats and mark completed. */
+async function finalizeCompletedUpload(args: {
+  uploadId: string
+  tenantId: string
+  totalProcessed: number
+  minTs: number
+  maxTs: number
+  uniqueVisitorsCount: number
+  windowStart: Date
+  windowEnd: Date
+}) {
+  const highIntentCount = await prisma.visitorProfile.count({
+    where: {
+      tenantId: args.tenantId,
+      windowStart: args.windowStart,
+      windowEnd: args.windowEnd,
+      engagementScore: { gte: 6 },
+    },
+  })
+  await prisma.upload.update({
+    where: { id: args.uploadId },
+    data: {
+      status: 'completed',
+      rowCount: args.totalProcessed,
+      processedAt: new Date(),
+      dataStartDate: new Date(args.minTs),
+      dataEndDate: new Date(args.maxTs),
+      totalEvents: args.totalProcessed,
+      uniqueVisitors: args.uniqueVisitorsCount,
+      highIntentCount,
+    },
+  })
+}
+
 /**
  * Process CSV from stream - never loads full file into memory (avoids OOM on large files)
  */
@@ -402,9 +436,15 @@ export async function processCSVUploadFromStream(
             await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd, identityByVisitor.get(visitorKey))
           }
 
-          await prisma.upload.update({
-            where: { id: uploadId },
-            data: { status: 'completed', rowCount: totalProcessed, processedAt: new Date() },
+          await finalizeCompletedUpload({
+            uploadId,
+            tenantId,
+            totalProcessed,
+            minTs,
+            maxTs,
+            uniqueVisitorsCount: realVisitorKeys.length,
+            windowStart,
+            windowEnd,
           })
           resolve({ rowCount: totalProcessed })
         } catch (err: any) {
@@ -535,14 +575,15 @@ export async function processCSVUpload(
       await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd, identityByVisitor.get(visitorKey))
     }
 
-    // Update upload status
-    await prisma.upload.update({
-      where: { id: uploadId },
-      data: {
-        status: 'completed',
-        rowCount: totalProcessed,
-        processedAt: new Date(),
-      },
+    await finalizeCompletedUpload({
+      uploadId,
+      tenantId,
+      totalProcessed,
+      minTs,
+      maxTs,
+      uniqueVisitorsCount: realVisitorKeys.length,
+      windowStart,
+      windowEnd,
     })
 
     return { rowCount: totalProcessed }

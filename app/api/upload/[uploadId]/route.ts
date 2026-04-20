@@ -19,6 +19,11 @@ export async function GET(
         error: true,
         processedAt: true,
         tenantId: true,
+        dataStartDate: true,
+        dataEndDate: true,
+        totalEvents: true,
+        uniqueVisitors: true,
+        highIntentCount: true,
       },
     })
 

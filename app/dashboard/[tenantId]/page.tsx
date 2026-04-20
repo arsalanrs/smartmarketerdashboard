@@ -128,6 +128,14 @@ export default function DashboardPage() {
     )
   }
 
+  const highIntent = data.metrics.highIntentVisitors
+  const defaultMatchRate = 0.5
+  const defaultCloseRate = 0.1
+  const defaultDealValue = 1000
+  const estMonthlyRevenue = Math.round(
+    highIntent * defaultMatchRate * defaultCloseRate * defaultDealValue
+  )
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 bg-white min-h-screen">
       {/* Header */}
@@ -155,7 +163,7 @@ export default function DashboardPage() {
 
       {/* KPI Cards */}
       <div className="mb-6">
-        <KPICards metrics={data.metrics} />
+        <KPICards metrics={data.metrics} estMonthlyRevenue={estMonthlyRevenue} />
       </div>
 
       <ROICalculator

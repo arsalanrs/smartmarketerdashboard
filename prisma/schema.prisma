@@ -34,6 +34,11 @@ model Upload {
   createdAt       DateTime  @default(now()) @map("created_at")
   processedAt     DateTime? @map("processed_at")
   error           String?
+  dataStartDate   DateTime? @map("data_start_date") // earliest EVENT_TIMESTAMP in the file
+  dataEndDate     DateTime? @map("data_end_date") // latest EVENT_TIMESTAMP in the file
+  totalEvents     Int?      @map("total_events")
+  uniqueVisitors  Int?      @map("unique_visitors") // distinct visitorKeys (excl. 'unknown')
+  highIntentCount Int?      @map("high_intent_count") // profiles with engagementScore >= 6 for this window
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rawEvents RawEvent[]

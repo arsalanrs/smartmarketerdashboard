@@ -7,9 +7,11 @@ interface KPICardsProps {
     newVisitors: number
     returningVisitors: number
   }
+  /** Optional: highIntent × 50% match × 10% close × $1k deal */
+  estMonthlyRevenue?: number
 }
 
-export default function KPICards({ metrics }: KPICardsProps) {
+export default function KPICards({ metrics, estMonthlyRevenue }: KPICardsProps) {
   const cards = [
     {
       title: 'Total Visitors',
@@ -41,8 +43,21 @@ export default function KPICards({ metrics }: KPICardsProps) {
     },
   ]
 
+  if (estMonthlyRevenue != null) {
+    cards.push({
+      title: 'Est. Monthly Revenue',
+      value: new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 0,
+      }).format(estMonthlyRevenue),
+      subtitle: 'at 50% match, 10% close, $1k deal',
+      color: '#1D6E95',
+    })
+  }
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       {cards.map((card, idx) => (
         <div key={idx} className="overflow-hidden rounded-xl bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
           <div className="p-6">

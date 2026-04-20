@@ -46,6 +46,8 @@ A collapsible card below the KPI section where the user inputs their business nu
 - Subtle disclaimer: *"These are estimates based on your inputs and observed engagement data."*
 - Toggle to collapse/expand the section (so it doesn't overwhelm the dashboard on first load)
 
+
+
 ### Files to Create/Modify
 
 #### `components/ROICalculator.tsx` — **NEW FILE**
