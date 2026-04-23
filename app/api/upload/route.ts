@@ -7,8 +7,6 @@ import os from 'os'
 import { randomUUID } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { processCSVUploadFromStream } from '@/lib/csv-processor'
-import { peekCsvHeaderCells } from '@/lib/csv-header-peek'
-import { parsePixelFormatField, resolvePixelFormat } from '@/lib/pixel-format'
 import { createUploadRecordResilient } from '@/lib/upload-create-compat'
 
 export async function POST(request: NextRequest) {
@@ -18,19 +16,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Expected multipart/form-data' }, { status: 400 })
     }
 
-    // Stream the file to a temp file so we can return 202 immediately and process in background.
-    // That way the client can poll and show "Processing… X%".
-    const { tenantId, filename, fileSizeBytes, tempPath, pixelFormatRaw } = await new Promise<{
+    const { tenantId, filename, fileSizeBytes, tempPath } = await new Promise<{
       tenantId: string
       filename: string
       fileSizeBytes: number | null
       tempPath: string
-      pixelFormatRaw: string | undefined
     }>((resolve, reject) => {
       const bb = Busboy({ headers: { 'content-type': contentType } })
       let tenantId = ''
       let fileSizeBytes: number | null = null
-      let pixelFormatRaw: string | undefined
       let fileReceived = false
 
       bb.on('field', (name: string, val: string) => {
@@ -39,7 +33,6 @@ export async function POST(request: NextRequest) {
           const n = parseInt(val, 10)
           if (!Number.isNaN(n) && n > 0) fileSizeBytes = n
         }
-        if (name === 'pixelFormat') pixelFormatRaw = val
       })
 
       bb.on('file', (name: string, stream: Readable, info: { filename: string }) => {
@@ -53,7 +46,7 @@ export async function POST(request: NextRequest) {
         stream.pipe(writeStream)
         writeStream.on('finish', () => {
           writeStream.close(() =>
-            resolve({ tenantId, filename: info.filename, fileSizeBytes, tempPath, pixelFormatRaw })
+            resolve({ tenantId, filename: info.filename, fileSizeBytes, tempPath })
           )
         })
         writeStream.on('error', (err) => {
@@ -82,26 +75,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Tenant not found' }, { status: 404 })
     }
 
-    let headerCells: string[] = []
-    try {
-      headerCells = await peekCsvHeaderCells(tempPath)
-    } catch (peekErr) {
-      console.warn('CSV header peek failed:', peekErr)
-    }
-    const pixelFormatChoice = parsePixelFormatField(pixelFormatRaw)
-    const effectivePixelFormat = resolvePixelFormat(pixelFormatChoice, headerCells)
-
     const upload = await createUploadRecordResilient({
       tenantId,
       filename,
       fileSizeBytes,
-      pixelExportFormat: effectivePixelFormat,
     })
 
-    // Process in background so we can return 202 and let the client poll for progress
     const processFromTemp = () => {
       const readStream = fs.createReadStream(tempPath)
-      processCSVUploadFromStream(tenantId, upload.id, readStream, { pixelFormat: effectivePixelFormat })
+      processCSVUploadFromStream(tenantId, upload.id, readStream)
         .then((result) => {
           console.log(`Upload ${upload.id} processed:`, result)
         })

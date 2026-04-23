@@ -3,12 +3,6 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import RevenueEstimator from '@/components/RevenueEstimator'
-import {
-  detectPixelFormatFromHeaders,
-  parseHeaderLine,
-  type PixelExportFormat,
-  type PixelFormatChoice,
-} from '@/lib/pixel-format'
 
 interface Tenant {
   id: string
@@ -25,7 +19,6 @@ interface UploadStatus {
   error: string | null
   processedAt: string | null
   tenantId: string
-  pixelExportFormat?: string | null
 }
 
 export default function UploadPage() {
@@ -38,8 +31,6 @@ export default function UploadPage() {
   const [progress, setProgress] = useState<string>('')
   const [progressPct, setProgressPct] = useState<number | null>(null)
   const [completedUploadId, setCompletedUploadId] = useState<string | null>(null)
-  const [pixelFormatChoice, setPixelFormatChoice] = useState<PixelFormatChoice>('auto')
-  const [sniffedFormat, setSniffedFormat] = useState<PixelExportFormat | null>(null)
 
   useEffect(() => {
     fetchTenants()
@@ -133,17 +124,6 @@ export default function UploadPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const next = e.target.files?.[0] ?? null
     setFile(next)
-    setSniffedFormat(null)
-    if (!next) return
-    const head = next.slice(0, 65536)
-    head
-      .text()
-      .then((text) => {
-        const line = text.split(/\r?\n/).find((l) => l.length > 0) ?? ''
-        const headers = parseHeaderLine(line)
-        if (headers.length > 0) setSniffedFormat(detectPixelFormatFromHeaders(headers))
-      })
-      .catch(() => setSniffedFormat(null))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -163,7 +143,6 @@ export default function UploadPage() {
       formData.append('file', file)
       formData.append('tenantId', selectedTenantId)
       formData.append('fileSize', String(file.size))
-      formData.append('pixelFormat', pixelFormatChoice)
 
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -236,11 +215,6 @@ export default function UploadPage() {
               {uploadStatus && (
                 <div className="mt-4 rounded-md bg-gray-50 p-3 text-left">
                   <div className="text-xs text-gray-500">Status: {uploadStatus.status}</div>
-                  {uploadStatus.pixelExportFormat && (
-                    <div className="text-xs text-gray-500">
-                      Pixel format used: {uploadStatus.pixelExportFormat}
-                    </div>
-                  )}
                   {uploadStatus.rowCount !== null && (
                     <div className="text-xs text-gray-500">Rows: {uploadStatus.rowCount}</div>
                   )}
@@ -299,53 +273,6 @@ export default function UploadPage() {
             )}
           </div>
 
-          <div>
-            <span className="block text-sm font-medium text-gray-700">Pixel export format</span>
-            <p className="mt-0.5 text-xs text-gray-500">
-              Auto uses the CSV header row (same rules as the server). Override if your file is unusual.
-            </p>
-            <div className="mt-2 flex flex-wrap gap-4 text-sm">
-              <label className="inline-flex cursor-pointer items-center gap-2">
-                <input
-                  type="radio"
-                  name="pixelFormat"
-                  checked={pixelFormatChoice === 'auto'}
-                  onChange={() => setPixelFormatChoice('auto')}
-                  disabled={uploading || processing}
-                  className="border-gray-300 text-[#1D6E95] focus:ring-[#1D6E95]"
-                />
-                Auto-detect
-              </label>
-              <label className="inline-flex cursor-pointer items-center gap-2">
-                <input
-                  type="radio"
-                  name="pixelFormat"
-                  checked={pixelFormatChoice === 'v3'}
-                  onChange={() => setPixelFormatChoice('v3')}
-                  disabled={uploading || processing}
-                  className="border-gray-300 text-[#1D6E95] focus:ring-[#1D6E95]"
-                />
-                Pixel v3
-              </label>
-              <label className="inline-flex cursor-pointer items-center gap-2">
-                <input
-                  type="radio"
-                  name="pixelFormat"
-                  checked={pixelFormatChoice === 'v4'}
-                  onChange={() => setPixelFormatChoice('v4')}
-                  disabled={uploading || processing}
-                  className="border-gray-300 text-[#1D6E95] focus:ring-[#1D6E95]"
-                />
-                Pixel v4
-              </label>
-            </div>
-            {pixelFormatChoice === 'auto' && sniffedFormat && file && (
-              <p className="mt-2 text-xs text-gray-600">
-                From this file’s headers: looks like <strong>Pixel {sniffedFormat}</strong>
-              </p>
-            )}
-          </div>
-
           <button
             type="submit"
             disabled={uploading || processing || !file || !selectedTenantId}
@@ -376,14 +303,9 @@ export default function UploadPage() {
         <div className="rounded-lg border bg-gray-50 p-4">
           <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">
             <li>
-              <strong>Pixel v3</strong> exports: <code className="text-xs">EVENT_TIMESTAMP</code>,{' '}
+              <strong>Smart Pixel</strong> CSV exports: <code className="text-xs">EVENT_TIMESTAMP</code>,{' '}
               <code className="text-xs">EVENT_TYPE</code>, <code className="text-xs">EVENT_DATA</code>,{' '}
-              <code className="text-xs">IP_ADDRESS</code>, etc.{' '}
-              <strong>Pixel v4</strong> enriched exports: <code className="text-xs">EVENT_TIMESTAMP</code>,{' '}
-              <code className="text-xs">HEM_SHA256</code>, <code className="text-xs">FULL_URL</code>,{' '}
-              <code className="text-xs">REFERRER_URL</code> (no <code className="text-xs">EVENT_DATA</code>{' '}
-              required — rows are ingested as page views). Choose <strong>Auto-detect</strong> or the
-              matching format above; the applied value is stored on the upload.
+              <code className="text-xs">IP_ADDRESS</code>, <code className="text-xs">HEM_SHA256</code>, etc.
             </li>
             <li>Processing may take a few minutes for large files (50k+ rows)</li>
             <li>When processing finishes, a revenue estimate from your pixel data appears below</li>

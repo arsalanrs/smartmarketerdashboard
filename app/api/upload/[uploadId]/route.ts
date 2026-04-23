@@ -15,10 +15,8 @@ const uploadSelectFull = {
   totalEvents: true,
   uniqueVisitors: true,
   highIntentCount: true,
-  pixelExportFormat: true,
 } as const
 
-/** Columns that exist before optional migrations (revenue stats + pixel format). */
 const uploadSelectLegacy = {
   id: true,
   status: true,
@@ -70,7 +68,6 @@ export async function GET(
           totalEvents: legacy.rowCount ?? null,
           uniqueVisitors,
           highIntentCount: null,
-          pixelExportFormat: null,
         }
       }
     }
@@ -88,4 +85,3 @@ export async function GET(
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
-

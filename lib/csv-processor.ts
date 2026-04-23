@@ -3,7 +3,6 @@ import Papa from 'papaparse'
 import { prisma } from './prisma'
 import { parseCoordinates, getGeoLocation } from './geo'
 import { calculateEngagementScore, getEngagementSegment, isKeyPage, isCTAClick, isExitIntent, isVideoEngaged, VisitorFlags } from './scoring'
-import type { PixelExportFormat } from './pixel-format'
 
 /** Progress polling; ignore if `processed_rows` column is missing on old DBs. */
 async function safeUploadSetProcessedRows(uploadId: string, processedRows: number) {
@@ -129,18 +128,7 @@ function extractEventDataFromRow(row: CSVRow): EventDataExtracted {
   return out
 }
 
-function pickUrlFromColumns(row: CSVRow, pixelFormat: PixelExportFormat): string | undefined {
-  if (pixelFormat === 'v4') {
-    return (
-      row['FULL_URL'] ||
-      row['Full Url'] ||
-      row['full_url'] ||
-      row['URL'] ||
-      row['Url'] ||
-      row['url'] ||
-      undefined
-    )
-  }
+function pickUrlFromColumns(row: CSVRow): string | undefined {
   return (
     row['URL'] ||
     row['Url'] ||
@@ -164,14 +152,9 @@ function pickReferrerFromColumns(row: CSVRow): string | undefined {
 }
 
 /**
- * Parse CSV row into ProcessedEvent.
- * Supports:
- * - **Pixel v3**: EVENT_TYPE, EVENT_DATA (JSON), URL/REFERRER, IP_ADDRESS, ACTIVITY_* dates, etc.
- * - **Pixel v4**: Enriched export with FULL_URL + REFERRER_URL + HEM_SHA256; often no EVENT_TYPE / EVENT_DATA / IP.
- * `pixelFormat` controls URL/referrer precedence when both EVENT_DATA and columns are present.
+ * Parse CSV row into ProcessedEvent (Smart Pixel export: EVENT_TYPE, EVENT_DATA JSON, URL columns, IP, etc.).
  */
-/** Exported for offline verification (v3/v4 samples); upload pipeline uses this internally. */
-export function parseRow(row: CSVRow, pixelFormat: PixelExportFormat): ProcessedEvent | null {
+export function parseRow(row: CSVRow): ProcessedEvent | null {
   const eventTs = getTimestampFromRow(row)
   if (!eventTs) return null
 
@@ -180,22 +163,11 @@ export function parseRow(row: CSVRow, pixelFormat: PixelExportFormat): Processed
   const ip = row['IP_ADDRESS'] || row['Ip Address'] || row['ip_address'] || row['ip'] || undefined
   const edid =
     row['EDID']?.trim() || row['Edid']?.trim() || row['edid']?.trim() || undefined
-  // HEM_SHA256 (hashed email) is primary in Smart Pixel exports; v4 may omit IP — EDID is last-resort key
   const visitorKey = hemSha256 || uuid || ip || edid || 'unknown'
 
   const ed = extractEventDataFromRow(row)
-  const colUrl = pickUrlFromColumns(row, pixelFormat)
-  const colRef = pickReferrerFromColumns(row)
-
-  let url: string | undefined
-  let referrerUrl: string | undefined
-  if (pixelFormat === 'v4') {
-    url = colUrl || ed.url
-    referrerUrl = colRef || ed.referrerUrl
-  } else {
-    url = ed.url || colUrl
-    referrerUrl = ed.referrerUrl || colRef
-  }
+  const url = ed.url || pickUrlFromColumns(row)
+  const referrerUrl = ed.referrerUrl || pickReferrerFromColumns(row)
 
   let timeOnPageMs = ed.timeOnPageMs
   let idleTimeMs = ed.idleTimeMs
@@ -236,7 +208,6 @@ export function parseRow(row: CSVRow, pixelFormat: PixelExportFormat): Processed
   )
 
   let eventType = row['EVENT_TYPE'] || row['Event Type'] || row['event_type'] || undefined
-  // v4 rows are typically one enriched record per page touch — treat as page_view when URL exists but type is absent
   if (!eventType && url) {
     eventType = 'page_view'
   }
@@ -425,10 +396,8 @@ async function finalizeCompletedUpload(args: {
 export async function processCSVUploadFromStream(
   tenantId: string,
   uploadId: string,
-  stream: ReadableStream<Uint8Array> | Readable,
-  options?: { pixelFormat?: PixelExportFormat }
+  stream: ReadableStream<Uint8Array> | Readable
 ): Promise<{ rowCount: number; error?: string }> {
-  const pixelFormat: PixelExportFormat = options?.pixelFormat ?? 'v3'
   // Accept both Web Streams (legacy) and Node.js Readables (from busboy - no buffering)
   const nodeStream: Readable = stream instanceof Readable ? stream : Readable.fromWeb(stream as any)
   return new Promise((resolve, reject) => {
@@ -458,7 +427,7 @@ export async function processCSVUploadFromStream(
       step(results: { data: CSVRow | CSVRow[] }, parser: { pause: () => void; resume: () => void }) {
         const rows = Array.isArray(results.data) ? results.data : [results.data].filter(Boolean) as CSVRow[]
         for (const row of rows) {
-          const event = parseRow(row, pixelFormat)
+          const event = parseRow(row)
           if (event) {
             // Strip rawJson from the event to save memory - identity captured separately
             event.rawJson = undefined
@@ -571,10 +540,8 @@ export async function processCSVUploadFromStream(
 export async function processCSVUpload(
   tenantId: string,
   uploadId: string,
-  csvContent: string,
-  options?: { pixelFormat?: PixelExportFormat }
+  csvContent: string
 ): Promise<{ rowCount: number; error?: string }> {
-  const pixelFormat: PixelExportFormat = options?.pixelFormat ?? 'v3'
   try {
     // Parse CSV
     const parseResult = Papa.parse<CSVRow>(csvContent, {
@@ -602,7 +569,7 @@ export async function processCSVUpload(
       const chunk = rows.slice(i, i + insertBatchSize)
       const batch: ProcessedEvent[] = []
       for (const row of chunk) {
-        const event = parseRow(row, pixelFormat)
+        const event = parseRow(row)
         if (event) {
           event.rawJson = undefined // don't store full row in DB
           batch.push(event)

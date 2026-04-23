@@ -24,14 +24,12 @@ function bareUploadRow(
     totalEvents: null,
     uniqueVisitors: null,
     highIntentCount: null,
-    pixelExportFormat: null,
   }
 }
 
 /**
- * Prisma `create()` emits INSERT … RETURNING for every Prisma model column (e.g. `pixel_export_format`).
- * Production DB may omit those columns — raw SQL matches a typical `uploads` table:
- * `id text NOT NULL`, `tenant_id`, `filename`, `status`, optional `file_size_bytes`, `created_at` default.
+ * Prisma `create()` uses INSERT … RETURNING for all schema columns. If the DB is behind migrations,
+ * raw SQL only touches columns that exist on typical `uploads` tables.
  */
 async function createUploadRawSql(
   tenantId: string,
@@ -88,7 +86,7 @@ async function createUploadRawSql(
       const outId = rows[0]?.id
       if (!outId) throw new Error('RETURNING id empty')
       console.warn(
-        `[upload] created upload row via raw SQL (${t.label}); add missing columns (e.g. pixel_export_format) or run prisma db push.`
+        `[upload] created upload row via raw SQL (${t.label}); run prisma db push if schema drift persists.`
       )
       return bareUploadRow(String(outId), tenantId, filename, t.fileSize ?? undefined)
     } catch (e) {
@@ -101,48 +99,27 @@ async function createUploadRawSql(
 }
 
 /**
- * Create an upload row even when production DB is behind Prisma schema
- * (missing pixel_export_format, file_size_bytes, etc.).
- * Used for every upload after CSV header peek — **Pixel v3 and v4** share this path; format only
- * affects `processCSVUploadFromStream` parsing, not which columns exist in `uploads`.
+ * Create upload row; fall back to raw SQL when ORM create fails (schema drift).
  */
 export async function createUploadRecordResilient(input: {
   tenantId: string
   filename: string
   fileSizeBytes: number | null | undefined
-  pixelExportFormat: string
 }): Promise<Upload> {
-  const { tenantId, filename, pixelExportFormat } = input
+  const { tenantId, filename } = input
   const size =
     input.fileSizeBytes != null && input.fileSizeBytes > 0 ? input.fileSizeBytes : undefined
 
   type Attempt = Pick<Prisma.UploadUncheckedCreateInput, 'tenantId' | 'filename' | 'status'> & {
     fileSizeBytes?: number
-    pixelExportFormat?: string
   }
 
   const minimal: Attempt = { tenantId, filename, status: 'processing' }
-  const attempts: Attempt[] = []
-
-  if (size != null) {
-    attempts.push({ ...minimal, fileSizeBytes: size, pixelExportFormat })
-    attempts.push({ ...minimal, fileSizeBytes: size })
-  } else {
-    attempts.push({ ...minimal, pixelExportFormat })
-  }
-  attempts.push(minimal)
-
-  const seen = new Set<string>()
-  const unique = attempts.filter((a) => {
-    const key = JSON.stringify(a)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  const attempts: Attempt[] = size != null ? [{ ...minimal, fileSizeBytes: size }, minimal] : [minimal]
 
   let lastError: unknown
-  for (let i = 0; i < unique.length; i++) {
-    const d = unique[i]
+  for (let i = 0; i < attempts.length; i++) {
+    const d = attempts[i]
     try {
       const data: Prisma.UploadUncheckedCreateInput = {
         tenantId: d.tenantId,
@@ -150,14 +127,13 @@ export async function createUploadRecordResilient(input: {
         status: d.status,
       }
       if (d.fileSizeBytes != null) data.fileSizeBytes = d.fileSizeBytes
-      if (d.pixelExportFormat != null) data.pixelExportFormat = d.pixelExportFormat
 
       return await prisma.upload.create({ data })
     } catch (e) {
       lastError = e
       const msg = e instanceof Error ? e.message : String(e)
       console.warn(
-        `[upload] create attempt ${i + 1}/${unique.length} failed:`,
+        `[upload] create attempt ${i + 1}/${attempts.length} failed:`,
         msg.split('\n')[0]?.slice(0, 220)
       )
     }
@@ -166,7 +142,7 @@ export async function createUploadRecordResilient(input: {
   try {
     return await createUploadRawSql(tenantId, filename, size)
   } catch (rawErr) {
-    console.error('[upload] raw SQL fallback exhausted; migrate DB (prisma db push or prisma/*.sql).')
+    console.error('[upload] raw SQL fallback exhausted; check DB and prisma/schema.prisma.')
     throw lastError ?? rawErr
   }
 }

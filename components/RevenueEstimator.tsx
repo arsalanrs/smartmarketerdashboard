@@ -32,7 +32,6 @@ interface UploadPayload {
   totalEvents: number | null
   uniqueVisitors: number | null
   highIntentCount: number | null
-  pixelExportFormat?: string | null
 }
 
 export default function RevenueEstimator({ uploadId, tenantId, embedded = false }: RevenueEstimatorProps) {
@@ -172,11 +171,6 @@ export default function RevenueEstimator({ uploadId, tenantId, embedded = false 
           Based on your actual pixel data
         </p>
         <div className="mt-2">{dateCallout}</div>
-        {upload.pixelExportFormat && (
-          <p className="mt-2 text-xs text-gray-600">
-            Import used <strong>Pixel {upload.pixelExportFormat}</strong> column rules.
-          </p>
-        )}
       </div>
 
       {showSmallSample && (
