@@ -365,19 +365,44 @@ async function finalizeCompletedUpload(args: {
       engagementScore: { gte: 6 },
     },
   })
-  await prisma.upload.update({
-    where: { id: args.uploadId },
-    data: {
-      status: 'completed',
-      rowCount: args.totalProcessed,
-      processedAt: new Date(),
-      dataStartDate: new Date(args.minTs),
-      dataEndDate: new Date(args.maxTs),
-      totalEvents: args.totalProcessed,
-      uniqueVisitors: args.uniqueVisitorsCount,
-      highIntentCount,
-    },
-  })
+  try {
+    await prisma.upload.update({
+      where: { id: args.uploadId },
+      data: {
+        status: 'completed',
+        rowCount: args.totalProcessed,
+        processedAt: new Date(),
+        dataStartDate: new Date(args.minTs),
+        dataEndDate: new Date(args.maxTs),
+        totalEvents: args.totalProcessed,
+        uniqueVisitors: args.uniqueVisitorsCount,
+        highIntentCount,
+      },
+    })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (
+      msg.includes('data_start_date') ||
+      msg.includes('data_end_date') ||
+      msg.includes('total_events') ||
+      msg.includes('unique_visitors') ||
+      msg.includes('high_intent_count')
+    ) {
+      console.warn(
+        '[upload] DB missing upload stats columns; add prisma/add_upload_stats_columns.sql or run db push. Completing with minimal fields.'
+      )
+      await prisma.upload.update({
+        where: { id: args.uploadId },
+        data: {
+          status: 'completed',
+          rowCount: args.totalProcessed,
+          processedAt: new Date(),
+        },
+      })
+    } else {
+      throw e
+    }
+  }
 }
 
 /**
