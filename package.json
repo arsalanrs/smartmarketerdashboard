@@ -10,7 +10,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "verify:v3": "npx tsx scripts/verify-v3-pixel-path.ts",
+    "dry-run:csv": "node scripts/dry-run-pixel-csv.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.4.0",
@@ -41,6 +43,7 @@
     "eslint-config-next": "16.1.6",
     "prisma": "^7.4.0",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

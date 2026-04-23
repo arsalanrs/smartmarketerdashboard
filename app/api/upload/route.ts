@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { processCSVUploadFromStream } from '@/lib/csv-processor'
 import { peekCsvHeaderCells } from '@/lib/csv-header-peek'
 import { parsePixelFormatField, resolvePixelFormat } from '@/lib/pixel-format'
+import { createUploadRecordResilient } from '@/lib/upload-create-compat'
 
 export async function POST(request: NextRequest) {
   try {
@@ -90,29 +91,12 @@ export async function POST(request: NextRequest) {
     const pixelFormatChoice = parsePixelFormatField(pixelFormatRaw)
     const effectivePixelFormat = resolvePixelFormat(pixelFormatChoice, headerCells)
 
-    const baseCreate = {
+    const upload = await createUploadRecordResilient({
       tenantId,
       filename,
-      status: 'processing' as const,
-      fileSizeBytes: fileSizeBytes ?? undefined,
-    }
-
-    let upload
-    try {
-      upload = await prisma.upload.create({
-        data: { ...baseCreate, pixelExportFormat: effectivePixelFormat },
-      })
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      if (msg.includes('pixel_export_format')) {
-        console.warn(
-          '[upload] DB missing pixel_export_format; add prisma/add_pixel_export_format.sql or run db push. Continuing without column.'
-        )
-        upload = await prisma.upload.create({ data: baseCreate })
-      } else {
-        throw e
-      }
-    }
+      fileSizeBytes,
+      pixelExportFormat: effectivePixelFormat,
+    })
 
     // Process in background so we can return 202 and let the client poll for progress
     const processFromTemp = () => {

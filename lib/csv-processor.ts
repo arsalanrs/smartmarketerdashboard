@@ -5,6 +5,19 @@ import { parseCoordinates, getGeoLocation } from './geo'
 import { calculateEngagementScore, getEngagementSegment, isKeyPage, isCTAClick, isExitIntent, isVideoEngaged, VisitorFlags } from './scoring'
 import type { PixelExportFormat } from './pixel-format'
 
+/** Progress polling; ignore if `processed_rows` column is missing on old DBs. */
+async function safeUploadSetProcessedRows(uploadId: string, processedRows: number) {
+  try {
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: { processedRows },
+    })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (!msg.includes('processed_rows')) throw e
+  }
+}
+
 export interface CSVRow {
   [key: string]: string | undefined
 }
@@ -157,7 +170,8 @@ function pickReferrerFromColumns(row: CSVRow): string | undefined {
  * - **Pixel v4**: Enriched export with FULL_URL + REFERRER_URL + HEM_SHA256; often no EVENT_TYPE / EVENT_DATA / IP.
  * `pixelFormat` controls URL/referrer precedence when both EVENT_DATA and columns are present.
  */
-function parseRow(row: CSVRow, pixelFormat: PixelExportFormat): ProcessedEvent | null {
+/** Exported for offline verification (v3/v4 samples); upload pipeline uses this internally. */
+export function parseRow(row: CSVRow, pixelFormat: PixelExportFormat): ProcessedEvent | null {
   const eventTs = getTimestampFromRow(row)
   if (!eventTs) return null
 
@@ -434,10 +448,7 @@ export async function processCSVUploadFromStream(
         skipDuplicates: false,
       })
       totalProcessed += toInsert.length
-      await prisma.upload.update({
-        where: { id: uploadId },
-        data: { processedRows: totalProcessed },
-      })
+      await safeUploadSetProcessedRows(uploadId, totalProcessed)
     }
 
     Papa.parse(nodeStream, {
@@ -611,10 +622,7 @@ export async function processCSVUpload(
         data: batch.map((event) => mapEventToDbRow(event, tenantId, uploadId)),
         skipDuplicates: false,
       })
-      await prisma.upload.update({
-        where: { id: uploadId },
-        data: { processedRows: totalProcessed },
-      })
+      await safeUploadSetProcessedRows(uploadId, totalProcessed)
     }
 
     const realVisitorKeys = [...visitorKeys].filter(k => k !== 'unknown')
