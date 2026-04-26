@@ -28,6 +28,12 @@ if (-not (Test-Path (Join-Path $ProjectRoot '.git'))) {
   & git -C $ProjectRoot init -b main
 }
 
+$email = (& git -C $ProjectRoot config user.email 2>$null)
+if (-not $email) {
+  & git -C $ProjectRoot config user.email 'arsalanrs@users.noreply.github.com'
+  & git -C $ProjectRoot config user.name 'arsalanrs'
+}
+
 # SSH remote (as requested). Ongoing push/pull needs SSH keys configured, or run this script again.
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = 'SilentlyContinue'
@@ -50,6 +56,9 @@ if ($dirty) {
 # Classic PAT: use GitHub username + PAT in URL (see https://docs.github.com/en/get-started/git-basics/about-remote-repositories).
 $pushUrl = "https://arsalanrs:${token}@github.com/arsalanrs/smartmarketerdashboard.git"
 & git -C $ProjectRoot push $pushUrl HEAD:main
+if ($LASTEXITCODE -ne 0) {
+  throw "git push failed (exit $LASTEXITCODE). If the remote has new commits, pull main with your token URL, rebase, then push again."
+}
 
 Write-Host 'Done. Pushed main to arsalanrs/smartmarketerdashboard (main).'
 Write-Host 'Origin is git@github.com:arsalanrs/smartmarketerdashboard.git - use SSH keys for day-to-day git push/pull, or run this script again to push with the token.'
