@@ -10,7 +10,7 @@ interface EngagementBreakdownProps {
 
 export default function EngagementBreakdown({ breakdown, total }: EngagementBreakdownProps) {
   const segments = [
-    { name: 'Casual', count: breakdown.Casual, color: 'bg-gray-500' },
+    { name: 'Casual', count: breakdown.Casual, color: '#6B7280' },
     { name: 'Researcher', count: breakdown.Researcher, color: '#1D6E95' },
     { name: 'High Intent', count: breakdown.HighIntent, color: '#FF8C02' },
     { name: 'Action', count: breakdown.Action, color: '#FF8C02' },
