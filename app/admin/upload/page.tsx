@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import RevenueEstimator from '@/components/RevenueEstimator'
 
 interface Tenant {
@@ -22,6 +23,7 @@ interface UploadStatus {
 }
 
 export default function UploadPage() {
+  const router = useRouter()
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [selectedTenantId, setSelectedTenantId] = useState<string>('')
   const [file, setFile] = useState<File | null>(null)
@@ -31,6 +33,16 @@ export default function UploadPage() {
   const [progress, setProgress] = useState<string>('')
   const [progressPct, setProgressPct] = useState<number | null>(null)
   const [completedUploadId, setCompletedUploadId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!selectedTenantId || !completedUploadId) return
+
+    const timer = setTimeout(() => {
+      router.push(`/dashboard/${selectedTenantId}?autoGenerateSummary=1`)
+    }, 1200)
+
+    return () => clearTimeout(timer)
+  }, [selectedTenantId, completedUploadId, router])
 
   useEffect(() => {
     fetchTenants()
@@ -285,6 +297,9 @@ export default function UploadPage() {
 
       {completedUploadId && selectedTenantId && (
         <div className="mt-8">
+          <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+            Upload complete. Redirecting to dashboard to generate AI summary...
+          </div>
           <h2 className="mb-4 text-lg font-semibold text-gray-900">Revenue estimate</h2>
           <RevenueEstimator uploadId={completedUploadId} tenantId={selectedTenantId} />
           <div className="mt-6">

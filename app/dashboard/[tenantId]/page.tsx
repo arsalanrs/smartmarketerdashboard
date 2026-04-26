@@ -68,11 +68,13 @@ export default function DashboardPage() {
   const [window, setWindow] = useState('L30')
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [revenueExpanded, setRevenueExpanded] = useState(true)
+  const [autoSummaryState, setAutoSummaryState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
 
   useEffect(() => {
     if (tenantId) {
-      fetchDashboard()
+      fetchDashboard(true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, window])
@@ -83,17 +85,65 @@ export default function DashboardPage() {
     
     const interval = setInterval(() => {
       // Only refresh if not currently loading
-      if (!loading) {
-        fetchDashboard()
+      if (!loading && !refreshing) {
+        fetchDashboard(false)
       }
     }, 30000) // 30 seconds instead of 10
 
     return () => clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, window])
+  }, [tenantId, window, loading, refreshing])
 
-  const fetchDashboard = async () => {
-    setLoading(true)
+  useEffect(() => {
+    if (!tenantId || !data?.latestUploadId) return
+    const params = new URLSearchParams(globalThis.window.location.search)
+    if (params.get('autoGenerateSummary') !== '1') return
+    if (autoSummaryState === 'running' || autoSummaryState === 'done') return
+
+    let cancelled = false
+    const run = async () => {
+      setAutoSummaryState('running')
+      try {
+        const res = await fetch('/api/ai-summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            window,
+            forceRegenerate: true,
+          }),
+        })
+
+        if (!res.ok) {
+          throw new Error('Failed to auto-generate summary')
+        }
+
+        if (!cancelled) {
+          setAutoSummaryState('done')
+          const nextParams = new URLSearchParams(globalThis.window.location.search)
+          nextParams.delete('autoGenerateSummary')
+          const next = nextParams.toString()
+          const nextUrl = next ? `/dashboard/${tenantId}?${next}` : `/dashboard/${tenantId}`
+          globalThis.window.history.replaceState({}, '', nextUrl)
+        }
+      } catch (error) {
+        console.error('Auto-generate summary failed:', error)
+        if (!cancelled) setAutoSummaryState('error')
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [tenantId, window, data?.latestUploadId, autoSummaryState])
+
+  const fetchDashboard = async (isInitialLoad = false) => {
+    if (isInitialLoad) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
       const res = await fetch(`/api/dashboard?tenantId=${tenantId}&window=${window}`)
       if (res.ok) {
@@ -107,7 +157,11 @@ export default function DashboardPage() {
       console.error('Error fetching dashboard:', error)
       alert('Failed to load dashboard')
     } finally {
-      setLoading(false)
+      if (isInitialLoad) {
+        setLoading(false)
+      } else {
+        setRefreshing(false)
+      }
     }
   }
 
@@ -146,11 +200,11 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <div className="flex items-center gap-3">
           <button
-            onClick={fetchDashboard}
-            disabled={loading}
+            onClick={() => fetchDashboard(false)}
+            disabled={loading || refreshing}
             className="rounded-md bg-gray-600 px-3 py-2 text-sm text-white hover:bg-gray-700 disabled:bg-gray-400"
           >
-            {loading ? 'Refreshing...' : 'Refresh'}
+            {refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
           <select
             value={window}
