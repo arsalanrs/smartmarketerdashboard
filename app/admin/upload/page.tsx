@@ -79,7 +79,8 @@ export default function UploadPage() {
     setProgress('Processing…')
     setCompletedUploadId(null)
 
-    const maxAttempts = 900
+    // ~4 hours at 1s interval (large CSVs + visitor/geo work on the server)
+    const maxAttempts = 14400
     let attempts = 0
 
     const poll = async () => {
