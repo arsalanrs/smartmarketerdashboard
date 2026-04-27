@@ -15,6 +15,8 @@ const uploadSelectFull = {
   totalEvents: true,
   uniqueVisitors: true,
   highIntentCount: true,
+  visitorProfileTotal: true,
+  visitorProfileProcessed: true,
 } as const
 
 const uploadSelectLegacy = {
@@ -68,6 +70,8 @@ export async function GET(
           totalEvents: legacy.rowCount ?? null,
           uniqueVisitors,
           highIntentCount: null,
+          visitorProfileTotal: null,
+          visitorProfileProcessed: null,
         }
       }
     }

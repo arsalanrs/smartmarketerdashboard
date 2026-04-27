@@ -35,6 +35,7 @@ yarn-error.log*
 
 # local secrets — never commit
 githubtoken
+env.sh
 
 # local pixel export dumps (often large / sensitive)
 pixel_export_*.csv

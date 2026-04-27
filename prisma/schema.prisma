@@ -39,6 +39,9 @@ model Upload {
   totalEvents     Int?      @map("total_events")
   uniqueVisitors  Int?      @map("unique_visitors") // distinct visitorKeys (excl. 'unknown')
   highIntentCount Int?      @map("high_intent_count") // profiles with engagementScore >= 6 for this window
+  /** Visitor profile build phase: progress for polling (distinct non-unknown visitors) */
+  visitorProfileTotal     Int? @map("visitor_profile_total")
+  visitorProfileProcessed   Int? @map("visitor_profile_processed")
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rawEvents RawEvent[]

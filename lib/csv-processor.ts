@@ -17,6 +17,26 @@ async function safeUploadSetProcessedRows(uploadId: string, processedRows: numbe
   }
 }
 
+/** Live visitor-profile build progress; ignore if DB columns are missing. */
+async function safeUploadSetVisitorProfileProgress(
+  uploadId: string,
+  processed: number,
+  total: number
+) {
+  try {
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: {
+        visitorProfileProcessed: processed,
+        visitorProfileTotal: total,
+      },
+    })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (!msg.includes('visitor_profile')) throw e
+  }
+}
+
 export interface CSVRow {
   [key: string]: string | undefined
 }
@@ -362,11 +382,31 @@ async function finalizeCompletedUpload(args: {
         totalEvents: args.totalProcessed,
         uniqueVisitors: args.uniqueVisitorsCount,
         highIntentCount,
+        visitorProfileTotal: null,
+        visitorProfileProcessed: null,
       },
     })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     if (
+      msg.includes('visitor_profile_total') ||
+      msg.includes('visitor_profile_processed') ||
+      msg.includes('visitor_profile')
+    ) {
+      await prisma.upload.update({
+        where: { id: args.uploadId },
+        data: {
+          status: 'completed',
+          rowCount: args.totalProcessed,
+          processedAt: new Date(),
+          dataStartDate: new Date(args.minTs),
+          dataEndDate: new Date(args.maxTs),
+          totalEvents: args.totalProcessed,
+          uniqueVisitors: args.uniqueVisitorsCount,
+          highIntentCount,
+        },
+      })
+    } else if (
       msg.includes('data_start_date') ||
       msg.includes('data_end_date') ||
       msg.includes('total_events') ||
@@ -471,7 +511,12 @@ export async function processCSVUploadFromStream(
           const windowEnd = new Date(maxTs)
           const windowStart = new Date(Math.max(minTs, maxTs - 30 * 24 * 60 * 60 * 1000))
 
-          for (const visitorKey of realVisitorKeys) {
+          const profileTotal = realVisitorKeys.length
+          if (profileTotal > 0) {
+            await safeUploadSetVisitorProfileProgress(uploadId, 0, profileTotal)
+          }
+          for (let i = 0; i < realVisitorKeys.length; i++) {
+            const visitorKey = realVisitorKeys[i]
             // Fetch events without rawJson (null in DB) to keep memory low
             const rawEvents = await prisma.rawEvent.findMany({
               where: { tenantId, uploadId, visitorKey },
@@ -501,6 +546,7 @@ export async function processCSVUploadFromStream(
               coordinates: r.coordinates as { lat: number; lng: number } | null | undefined,
             }))
             await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd, identityByVisitor.get(visitorKey))
+            await safeUploadSetVisitorProfileProgress(uploadId, i + 1, profileTotal)
           }
 
           await finalizeCompletedUpload({
@@ -608,7 +654,12 @@ export async function processCSVUpload(
     const windowStart = new Date(Math.max(minTs, maxTs - 30 * 24 * 60 * 60 * 1000))
 
     // Build visitor profiles one at a time; skip 'unknown' (would load ALL unidentified events at once)
-    for (const visitorKey of realVisitorKeys) {
+    const profileTotal = realVisitorKeys.length
+    if (profileTotal > 0) {
+      await safeUploadSetVisitorProfileProgress(uploadId, 0, profileTotal)
+    }
+    for (let i = 0; i < realVisitorKeys.length; i++) {
+      const visitorKey = realVisitorKeys[i]
       const rawEvents = await prisma.rawEvent.findMany({
         where: { tenantId, uploadId, visitorKey },
         orderBy: { eventTs: 'asc' },
@@ -637,6 +688,7 @@ export async function processCSVUpload(
         coordinates: r.coordinates as { lat: number; lng: number } | null | undefined,
       }))
       await processVisitorProfile(tenantId, visitorKey, events, windowStart, windowEnd, identityByVisitor.get(visitorKey))
+      await safeUploadSetVisitorProfileProgress(uploadId, i + 1, profileTotal)
     }
 
     await finalizeCompletedUpload({

@@ -20,6 +20,8 @@ interface UploadStatus {
   error: string | null
   processedAt: string | null
   tenantId: string
+  visitorProfileTotal?: number | null
+  visitorProfileProcessed?: number | null
 }
 
 export default function UploadPage() {
@@ -111,15 +113,31 @@ export default function UploadPage() {
       }
 
       if (status.status === 'processing') {
-        const n = status.processedRows ?? 0
-        const fileSize = status.fileSizeBytes ?? 0
-        const estimatedRows = fileSize > 0 ? Math.max(1, Math.round(fileSize / 400)) : 0
-        const pct = estimatedRows > 0 && n > 0 ? Math.min(99, Math.round((n / estimatedRows) * 100)) : null
-        setProgressPct(pct)
-        if (pct != null) {
-          setProgress(`Processing… ${pct}% (${n.toLocaleString()} rows)`)
+        const vTotal = status.visitorProfileTotal
+        const vProc = status.visitorProfileProcessed ?? 0
+        const inProfilePhase = vTotal != null && vTotal > 0
+
+        if (inProfilePhase) {
+          const profilePct = Math.min(100, Math.round((vProc / vTotal) * 100))
+          setProgressPct(profilePct)
+          setProgress(
+            `Building visitor profiles (${vProc.toLocaleString()} of ${vTotal.toLocaleString()})...`
+          )
         } else {
-          setProgress(n > 0 ? `Processed ${n.toLocaleString()} rows…` : 'Processing CSV file…')
+          const n = status.processedRows ?? 0
+          const fileSize = status.fileSizeBytes ?? 0
+          const estimatedRows = fileSize > 0 ? Math.max(1, Math.round(fileSize / 400)) : 0
+          const pct = estimatedRows > 0 && n > 0 ? Math.min(99, Math.round((n / estimatedRows) * 100)) : null
+          setProgressPct(pct)
+          if (pct != null) {
+            setProgress(`Uploading rows... ${pct}% (${n.toLocaleString()} rows)`)
+          } else {
+            setProgress(
+              n > 0
+                ? `Uploading rows... ${n.toLocaleString()} rows ingested so far`
+                : 'Uploading rows...'
+            )
+          }
         }
       }
 
@@ -214,7 +232,11 @@ export default function UploadPage() {
                 />
               </div>
               <h2 className="mb-2 text-xl font-semibold text-gray-900">
-                {uploading ? 'Uploading...' : 'Processing CSV'}
+                {uploading
+                  ? 'Uploading...'
+                  : (uploadStatus?.visitorProfileTotal != null && uploadStatus.visitorProfileTotal > 0
+                      ? 'Building visitor profiles'
+                      : 'Processing CSV')}
               </h2>
               <p className="mb-2 text-sm text-gray-600">{progress || 'Please wait...'}</p>
               {progressPct != null && (

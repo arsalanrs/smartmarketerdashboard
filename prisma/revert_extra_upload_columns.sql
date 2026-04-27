@@ -3,5 +3,4 @@
 ALTER TABLE "uploads" DROP COLUMN IF EXISTS "geo_enrichment_total";
 ALTER TABLE "uploads" DROP COLUMN IF EXISTS "geo_enrichment_processed";
 ALTER TABLE "uploads" DROP COLUMN IF EXISTS "ingest_aux";
-ALTER TABLE "uploads" DROP COLUMN IF EXISTS "visitor_profile_total";
-ALTER TABLE "uploads" DROP COLUMN IF EXISTS "visitor_profile_processed";
+-- visitor_profile_* are used for upload progress; do not drop if you use admin CSV upload.
