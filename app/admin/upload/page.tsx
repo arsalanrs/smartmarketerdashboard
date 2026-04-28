@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import RevenueEstimator from '@/components/RevenueEstimator'
@@ -37,6 +37,8 @@ export default function UploadPage() {
   const [completedUploadId, setCompletedUploadId] = useState<string | null>(null)
   const [showProcessChoice, setShowProcessChoice] = useState(false)
   const [pendingUploadId, setPendingUploadId] = useState<string | null>(null)
+  /** Ensures profile-phase choice modal only once per upload, after ingest finishes and profile build starts */
+  const profileChoiceOfferedForUploadRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!selectedTenantId || !completedUploadId) return
@@ -119,6 +121,14 @@ export default function UploadPage() {
         const vProc = status.visitorProfileProcessed ?? 0
         const inProfilePhase = vTotal != null && vTotal > 0
 
+        // Offer wait vs dashboard only when ingest is done and visitor-profile build begins (not at upload POST)
+        if (inProfilePhase && profileChoiceOfferedForUploadRef.current !== uploadId) {
+          profileChoiceOfferedForUploadRef.current = uploadId
+          setPendingUploadId(uploadId)
+          setShowProcessChoice(true)
+          return
+        }
+
         if (inProfilePhase) {
           const profilePct = Math.min(100, Math.round((vProc / vTotal) * 100))
           setProgressPct(profilePct)
@@ -172,6 +182,7 @@ export default function UploadPage() {
     setCompletedUploadId(null)
     setShowProcessChoice(false)
     setPendingUploadId(null)
+    profileChoiceOfferedForUploadRef.current = null
 
     try {
       const formData = new FormData()
@@ -190,8 +201,7 @@ export default function UploadPage() {
         const fileInput = document.getElementById('file') as HTMLInputElement
         if (fileInput) fileInput.value = ''
         if (data.status === 'processing' || res.status === 202) {
-          setPendingUploadId(data.id)
-          setShowProcessChoice(true)
+          void pollUploadStatus(data.id, selectedTenantId)
           return
         }
         if (data.status === 'completed') {
@@ -220,6 +230,7 @@ export default function UploadPage() {
   const goToDashboardWhileProcessing = () => {
     if (!selectedTenantId) return
     setShowProcessChoice(false)
+    setProcessing(false)
     setPendingUploadId(null)
     setUploadStatus(null)
     setProgress('')
@@ -245,11 +256,10 @@ export default function UploadPage() {
           <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-xl">
             {showProcessChoice ? (
               <div className="text-center">
-                <h2 className="mb-3 text-xl font-semibold text-gray-900">Processing started</h2>
+                <h2 className="mb-3 text-xl font-semibold text-gray-900">Visitor profiles are starting</h2>
                 <p className="mb-2 text-left text-sm leading-relaxed text-gray-600">
-                  Large files can take a long time to finish (sometimes an hour or more) while we ingest
-                  rows, build visitor profiles, and run analysis. The process continues on the server
-                  either way.
+                  Row ingestion is done — this phase can still take a long time (sometimes an hour or more)
+                  while we build visitor profiles on the server. You can leave this page if you prefer.
                 </p>
                 <p className="mb-6 text-left text-sm text-gray-600">What would you like to do?</p>
                 <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
@@ -399,7 +409,10 @@ export default function UploadPage() {
               <code className="text-xs">EVENT_TYPE</code>, <code className="text-xs">EVENT_DATA</code>,{' '}
               <code className="text-xs">IP_ADDRESS</code>, <code className="text-xs">HEM_SHA256</code>, etc.
             </li>
-            <li>Very large files can take a long time (even an hour); after upload you can stay on this page for live progress or go to the dashboard while processing continues</li>
+            <li>
+              Row upload runs first; when visitor-profile building begins you may choose to watch progress
+              here or continue on the dashboard while the server finishes
+            </li>
             <li>When processing finishes, a revenue estimate from your pixel data appears below</li>
             <li>Use <strong>Go to Dashboard</strong> when you are ready to leave this page</li>
             <li>System will automatically geolocate IPs, compute scores, and generate AI summaries</li>
