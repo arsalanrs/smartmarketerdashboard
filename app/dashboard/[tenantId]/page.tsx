@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import KPICards from '@/components/KPICards'
@@ -15,6 +15,7 @@ interface DashboardData {
   windowStart: string
   windowEnd: string
   latestUploadId: string | null
+  processingUploadId: string | null
   metrics: {
     totalVisitors: number
     engagedVisitors: number
@@ -72,27 +73,51 @@ export default function DashboardPage() {
   const [revenueExpanded, setRevenueExpanded] = useState(true)
   const [autoSummaryState, setAutoSummaryState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
 
+  const fetchDashboard = useCallback(async (isInitialLoad = false) => {
+    if (isInitialLoad) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
+    try {
+      const res = await fetch(`/api/dashboard?tenantId=${tenantId}&window=${window}`)
+      if (res.ok) {
+        const dashboardData = await res.json()
+        setData(dashboardData)
+      } else {
+        const error = await res.json()
+        alert(error.error || 'Failed to load dashboard')
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard:', error)
+      alert('Failed to load dashboard')
+    } finally {
+      if (isInitialLoad) {
+        setLoading(false)
+      } else {
+        setRefreshing(false)
+      }
+    }
+  }, [tenantId, window])
+
   useEffect(() => {
     if (tenantId) {
-      fetchDashboard(true)
+      void fetchDashboard(true)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, window])
+  }, [tenantId, window, fetchDashboard])
 
   // Auto-refresh every 30 seconds to catch new uploads (less aggressive)
   useEffect(() => {
     if (!tenantId) return
-    
+
     const interval = setInterval(() => {
-      // Only refresh if not currently loading
       if (!loading && !refreshing) {
-        fetchDashboard(false)
+        void fetchDashboard(false)
       }
-    }, 30000) // 30 seconds instead of 10
+    }, 30000)
 
     return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, window, loading, refreshing])
+  }, [tenantId, window, loading, refreshing, fetchDashboard])
 
   useEffect(() => {
     if (!tenantId || !data?.latestUploadId) return
@@ -137,33 +162,6 @@ export default function DashboardPage() {
       cancelled = true
     }
   }, [tenantId, window, data?.latestUploadId, autoSummaryState])
-
-  const fetchDashboard = async (isInitialLoad = false) => {
-    if (isInitialLoad) {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
-    }
-    try {
-      const res = await fetch(`/api/dashboard?tenantId=${tenantId}&window=${window}`)
-      if (res.ok) {
-        const dashboardData = await res.json()
-        setData(dashboardData)
-      } else {
-        const error = await res.json()
-        alert(error.error || 'Failed to load dashboard')
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard:', error)
-      alert('Failed to load dashboard')
-    } finally {
-      if (isInitialLoad) {
-        setLoading(false)
-      } else {
-        setRefreshing(false)
-      }
-    }
-  }
 
   const handleVisitorClick = (visitor: any) => {
     router.push(`/dashboard/${tenantId}/visitors?select=${encodeURIComponent(visitor.visitorKey)}`)
@@ -273,7 +271,12 @@ export default function DashboardPage() {
 
       {/* Map and AI Summary Side by Side */}
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <VisitorMap visitors={data.profiles} />
+        <VisitorMap
+          visitors={data.profiles}
+          tenantId={tenantId}
+          processingUploadId={data.processingUploadId ?? null}
+          onRefreshDashboard={() => fetchDashboard(false)}
+        />
         <AISummary tenantId={tenantId} window={window} />
       </div>
 

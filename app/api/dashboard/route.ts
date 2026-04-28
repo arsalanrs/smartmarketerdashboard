@@ -25,6 +25,12 @@ export async function GET(request: NextRequest) {
       select: { id: true },
     })
 
+    const activeProcessingUpload = await prisma.upload.findFirst({
+      where: { tenantId, status: { in: ['pending', 'processing'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    })
+
     // Calculate KPIs
     const totalVisitors = profiles.length
     const engagedVisitors = profiles.filter((p: any) => p.engagementScore >= 3).length
@@ -131,6 +137,7 @@ export async function GET(request: NextRequest) {
       windowStart,
       windowEnd,
       latestUploadId: latestUpload?.id ?? null,
+      processingUploadId: activeProcessingUpload?.id ?? null,
       metrics: {
         totalVisitors,
         engagedVisitors,

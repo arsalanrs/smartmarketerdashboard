@@ -35,6 +35,8 @@ export default function UploadPage() {
   const [progress, setProgress] = useState<string>('')
   const [progressPct, setProgressPct] = useState<number | null>(null)
   const [completedUploadId, setCompletedUploadId] = useState<string | null>(null)
+  const [showProcessChoice, setShowProcessChoice] = useState(false)
+  const [pendingUploadId, setPendingUploadId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!selectedTenantId || !completedUploadId) return
@@ -168,6 +170,8 @@ export default function UploadPage() {
     setProgress('')
     setProgressPct(null)
     setCompletedUploadId(null)
+    setShowProcessChoice(false)
+    setPendingUploadId(null)
 
     try {
       const formData = new FormData()
@@ -186,7 +190,8 @@ export default function UploadPage() {
         const fileInput = document.getElementById('file') as HTMLInputElement
         if (fileInput) fileInput.value = ''
         if (data.status === 'processing' || res.status === 202) {
-          await pollUploadStatus(data.id, selectedTenantId)
+          setPendingUploadId(data.id)
+          setShowProcessChoice(true)
           return
         }
         if (data.status === 'completed') {
@@ -212,55 +217,104 @@ export default function UploadPage() {
     }
   }
 
-  const showOverlay = uploading || (processing && uploadStatus?.status !== 'completed')
+  const goToDashboardWhileProcessing = () => {
+    if (!selectedTenantId) return
+    setShowProcessChoice(false)
+    setPendingUploadId(null)
+    setUploadStatus(null)
+    setProgress('')
+    setProgressPct(null)
+    router.push(`/dashboard/${selectedTenantId}`)
+  }
+
+  const waitForProgressHere = () => {
+    if (!pendingUploadId) return
+    setShowProcessChoice(false)
+    void pollUploadStatus(pendingUploadId, selectedTenantId)
+  }
+
+  const showOverlay =
+    uploading || showProcessChoice || (processing && uploadStatus?.status !== 'completed')
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <h1 className="mb-6 text-2xl font-bold text-gray-900">Upload CSV</h1>
 
       {showOverlay && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="mx-4 w-full max-w-md rounded-lg bg-white p-8 shadow-xl">
-            <div className="text-center">
-              <div className="mb-4">
-                <div
-                  className="mx-auto h-12 w-12 animate-spin rounded-full border-4"
-                  style={{
-                    borderColor: 'rgba(29, 110, 149, 0.2)',
-                    borderTopColor: '#1D6E95',
-                  }}
-                />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-xl">
+            {showProcessChoice ? (
+              <div className="text-center">
+                <h2 className="mb-3 text-xl font-semibold text-gray-900">Processing started</h2>
+                <p className="mb-2 text-left text-sm leading-relaxed text-gray-600">
+                  Large files can take a long time to finish (sometimes an hour or more) while we ingest
+                  rows, build visitor profiles, and run analysis. The process continues on the server
+                  either way.
+                </p>
+                <p className="mb-6 text-left text-sm text-gray-600">What would you like to do?</p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+                  <button
+                    type="button"
+                    onClick={waitForProgressHere}
+                    className="rounded-md px-4 py-2.5 text-sm font-medium text-white btn-primary-blue"
+                  >
+                    Wait here and watch progress
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goToDashboardWhileProcessing}
+                    className="rounded-md border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50"
+                  >
+                    Go to dashboard
+                  </button>
+                </div>
+                <p className="mt-4 text-xs text-gray-500">
+                  You can return to this upload page later to see status if you leave.
+                </p>
               </div>
-              <h2 className="mb-2 text-xl font-semibold text-gray-900">
-                {uploading
-                  ? 'Uploading...'
-                  : (uploadStatus?.visitorProfileTotal != null && uploadStatus.visitorProfileTotal > 0
-                      ? 'Building visitor profiles'
-                      : 'Processing CSV')}
-              </h2>
-              <p className="mb-2 text-sm text-gray-600">{progress || 'Please wait...'}</p>
-              {progressPct != null && (
-                <div className="mb-4 w-full rounded-full bg-gray-200">
+            ) : (
+              <div className="text-center">
+                <div className="mb-4">
                   <div
-                    className="h-2 rounded-full transition-all duration-500 ease-out"
-                    style={{ width: `${progressPct}%`, backgroundColor: '#1D6E95' }}
+                    className="mx-auto h-12 w-12 animate-spin rounded-full border-4"
+                    style={{
+                      borderColor: 'rgba(29, 110, 149, 0.2)',
+                      borderTopColor: '#1D6E95',
+                    }}
                   />
                 </div>
-              )}
-              {uploadStatus && (
-                <div className="mt-4 rounded-md bg-gray-50 p-3 text-left">
-                  <div className="text-xs text-gray-500">Status: {uploadStatus.status}</div>
-                  {uploadStatus.rowCount !== null && (
-                    <div className="text-xs text-gray-500">Rows: {uploadStatus.rowCount}</div>
-                  )}
-                </div>
-              )}
-              {processing && !uploadStatus?.error && (
-                <p className="mt-4 text-xs text-gray-500">
-                  This may take a few minutes for large files...
-                </p>
-              )}
-            </div>
+                <h2 className="mb-2 text-xl font-semibold text-gray-900">
+                  {uploading
+                    ? 'Uploading...'
+                    : (uploadStatus?.visitorProfileTotal != null && uploadStatus.visitorProfileTotal > 0
+                        ? 'Building visitor profiles'
+                        : 'Processing CSV')}
+                </h2>
+                <p className="mb-2 text-sm text-gray-600">{progress || 'Please wait...'}</p>
+                {progressPct != null && (
+                  <div className="mb-4 w-full rounded-full bg-gray-200">
+                    <div
+                      className="h-2 rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${progressPct}%`, backgroundColor: '#1D6E95' }}
+                    />
+                  </div>
+                )}
+                {uploadStatus && (
+                  <div className="mt-4 rounded-md bg-gray-50 p-3 text-left">
+                    <div className="text-xs text-gray-500">Status: {uploadStatus.status}</div>
+                    {uploadStatus.rowCount !== null && (
+                      <div className="text-xs text-gray-500">Rows: {uploadStatus.rowCount}</div>
+                    )}
+                  </div>
+                )}
+                {processing && !uploadStatus?.error && !uploading && (
+                  <p className="mt-4 text-xs text-gray-500">
+                    This may take a long time for very large files — you can stay here or return from the
+                    upload page.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -276,7 +330,7 @@ export default function UploadPage() {
               required
               value={selectedTenantId}
               onChange={(e) => setSelectedTenantId(e.target.value)}
-              disabled={uploading || processing}
+              disabled={uploading || processing || showProcessChoice}
               className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:outline-none focus:border-[#1D6E95] focus:ring-1 focus:ring-[#1D6E95] disabled:bg-gray-100"
             >
               <option value="">Select a client</option>
@@ -298,7 +352,7 @@ export default function UploadPage() {
               required
               accept=".csv"
               onChange={handleFileChange}
-              disabled={uploading || processing}
+              disabled={uploading || processing || showProcessChoice}
               className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:rounded-md file:border-0 file:px-4 file:py-2 file:text-sm file:font-semibold file:bg-[rgba(29,110,149,0.1)] file:text-[#1D6E95] hover:file:bg-[rgba(29,110,149,0.15)] disabled:opacity-50"
             />
             {file && (
@@ -310,7 +364,7 @@ export default function UploadPage() {
 
           <button
             type="submit"
-            disabled={uploading || processing || !file || !selectedTenantId}
+            disabled={uploading || processing || showProcessChoice || !file || !selectedTenantId}
             className="rounded-md px-4 py-2 text-white disabled:bg-gray-400 disabled:opacity-50 btn-primary-blue"
           >
             {uploading ? 'Uploading...' : processing ? 'Processing...' : 'Upload & Process'}
@@ -345,7 +399,7 @@ export default function UploadPage() {
               <code className="text-xs">EVENT_TYPE</code>, <code className="text-xs">EVENT_DATA</code>,{' '}
               <code className="text-xs">IP_ADDRESS</code>, <code className="text-xs">HEM_SHA256</code>, etc.
             </li>
-            <li>Processing may take a few minutes for large files (50k+ rows)</li>
+            <li>Very large files can take a long time (even an hour); after upload you can stay on this page for live progress or go to the dashboard while processing continues</li>
             <li>When processing finishes, a revenue estimate from your pixel data appears below</li>
             <li>Use <strong>Go to Dashboard</strong> when you are ready to leave this page</li>
             <li>System will automatically geolocate IPs, compute scores, and generate AI summaries</li>
