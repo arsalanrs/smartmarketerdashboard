@@ -14,12 +14,13 @@ export default function Nav() {
           <div className="flex items-center">
             <Link href="/" className="flex items-center">
               <Image
-                src="/logosmartmarketer.png"
+                src="/SM-logo2026-full-size.svg"
                 alt="Smart Marketer"
-                width={180}
-                height={40}
+                width={846}
+                height={100}
                 className="h-8 w-auto"
                 priority
+                unoptimized
               />
             </Link>
           </div>
